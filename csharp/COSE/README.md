@@ -1,6 +1,15 @@
-# CBOR Encoded Message Syntax - Implementations
+# CBOR Encoded Message Syntax - C# class library
 
-This project is running in parallel with the cose-spec project.  That project is defining the specification, while this project is providing some publicly available implementations of the COSE specification.
+This directory contains a stand alone class library for the COSE specification.
+
+In order to compile this project, the following additional projects are needed.:
+
+CBOR - We use the project @ https://github.com/peteroupc/CBOR for this purpose.
+Crypto - We use the Bouncy Castle C# library for this purpose.
+
+## Current State
+
+It can do encoding for a lot of things, but doesn't yet do any decoding to speak of.
 
 ## Contributing
 
