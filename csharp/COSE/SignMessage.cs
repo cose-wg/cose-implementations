@@ -23,32 +23,8 @@ namespace COSE
     {
         CBORObject obj;
 
-         CBORObject objUnprotected;
-         CBORObject objProtected;
          List<Signer> signerList = new List<Signer>();
          byte[] rgbContent;
-
-        public void AddProtected(string name, string value)
-        {
-            if (objProtected == null) objProtected = CBORObject.NewMap();
-            if (objProtected.ContainsKey(name)) objProtected.Set(name, value);
-            else objProtected.Add(name, value);
-            //           if ((objUnprotected != null) && (objUnprotected.ContainsKey(name))) objUnprotected.Remove(new CBORObject(CBORType.TextString,  name));
-        }
-
-        public void AddUnprotected(string name, string value)
-        {
-            if (objUnprotected == null) objUnprotected = CBORObject.NewMap();
-            if (objUnprotected.ContainsKey(name)) objUnprotected.Set(name, value);
-            else objUnprotected.Add(name, value);
-            //           if ((objProtected != null) && (objProtected.ContainsKey(name))) objProtected.Remove(name);
-        }
-
-        public void AddUnprotected(string name, CBORObject obj)
-        {
-            if (objUnprotected == null) objUnprotected = CBORObject.NewMap();
-            objUnprotected.Add(name, obj);
-        }
 
         public void AddSigner(Signer sig)
         {

@@ -17,6 +17,11 @@ namespace COSE
             m_map = CBORObject.NewMap();
         }
 
+        public Key(CBORObject objKey)
+        {
+            m_map = objKey;
+        }
+
         public void Add(string name, string value)
         {
             m_map.Add(name, value);
@@ -26,6 +31,19 @@ namespace COSE
         {
             m_map.Add(name, value);
         }
+
+        public Org.BouncyCastle.Math.BigInteger AsBigInteger(string keyName)
+        {
+
+            byte[] rgb = AsBytes(keyName);
+            byte[] rgb2 = new byte[rgb.Length + 2];
+            rgb2[0] = 0;
+            rgb2[1] = 0;
+            for (int i = 0; i < rgb.Length; i++) rgb2[i + 2] = rgb[i];
+
+            return new Org.BouncyCastle.Math.BigInteger(rgb2);
+        }
+
 
         public byte[] AsBytes(string name)
         {

@@ -11,7 +11,7 @@ namespace examples
     {
         static void Main(string[] args)
         {
-            SignExamples();
+            // SignExamples();
             EncryptionExamples();
             MacExamples();
 
@@ -66,7 +66,7 @@ namespace examples
         static void EncryptionExamples()
         {
             //  Direct encryption example
-            if (false) {
+            if (true) {
                 COSE.EncryptMessage msg = new COSE.EncryptMessage();
 
                 msg.SetContent("Content String");
@@ -92,10 +92,10 @@ namespace examples
 
                 COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
 
-                // msg2.Decrypt(key);
+                msg2.Decrypt(key);
             }
             //  Key wrap example
-            if (false) {
+            if (true) {
                 COSE.EncryptMessage msg = new COSE.EncryptMessage();
 
                 msg.SetContent("Content String");
@@ -121,7 +121,7 @@ namespace examples
 
                 COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
 
-                // msg2.Decrypt(key);
+                msg2.Decrypt(key);
             }
 
             // ECDH Example - Direct
@@ -145,11 +145,47 @@ namespace examples
 
                 byte[] rgb = msg.EncodeToBytes();
 
-                Console.WriteLine("Key Wrap Encoding Example:");
+                Console.WriteLine("ECDH direct Encoding Example:");
                 Console.WriteLine("Line Length is " + rgb.Length);
                 Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
                 string strT = BitConverter.ToString(rgb).Replace('-', ' ');
                 Console.WriteLine();
+
+                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
+
+                msg2.Decrypt(key);
+            }
+
+            // ECDH + keywrap example
+            if (true) {
+                COSE.Key key = new COSE.Key();
+
+                key.Add("kty", "EC");
+                key.Add("kid", "meriadoc.brandybuck@buckland.example");
+                key.Add("use", "enc");
+                key.Add("crv", "P-256");
+                key.Add("x", base64urldecode("Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0"));
+                key.Add("y", base64urldecode("HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw"));
+                key.Add("d", base64urldecode("r_kHyZ-a06rmxM3yESK84r1otSg-aQcVStkRhA-iCM8"));
+
+                COSE.EncryptMessage msg = new COSE.EncryptMessage();
+
+                msg.SetContent("Content String");
+
+                COSE.Recipient recipient = new COSE.Recipient(key);
+                msg.AddRecipient(recipient);
+
+                byte[] rgb = msg.EncodeToBytes();
+
+                Console.WriteLine("ECDH direct Encoding Example:");
+                Console.WriteLine("Line Length is " + rgb.Length);
+                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
+                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
+                Console.WriteLine();
+
+                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
+
+                msg2.Decrypt(key);
 
             }
         }
