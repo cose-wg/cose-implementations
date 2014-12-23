@@ -52,7 +52,7 @@ var Utf8 = {
         return string;
     },
     ab2str: function(buf) {
-        return String.fromCharCode.apply(null, new Uint16Array(buf));
+        return String.fromCharCode.apply(null, new Uint8Array(buf));
     },
     str2ab: function(str) {
         var buf = new ArrayBuffer(str.length*2); // 2 bytes for each char
@@ -61,5 +61,18 @@ var Utf8 = {
             bufView[i] = str.charCodeAt(i);
         }
         return buf;
+    },
+    ab2hex: function(buf) {
+        var chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+        var str = "";
+        var dataview = new DataView(buf);
+        
+        for (var i=0; i<buf.byteLength; i++) {
+            var byteX = dataview.getUint8(i);
+            str += chars[byteX >> 4];
+            str += chars[byteX & 0xf];
+            str += " ";
+        }
+        return str;
     }
 }

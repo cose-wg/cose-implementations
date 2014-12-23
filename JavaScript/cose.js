@@ -54,52 +54,135 @@ EncryptMessage.prototype = {
         this.recipientList.push(recip);
     },
 
+    DecodeFromCBOR: function(cborValue) { // method that turns a CBOR object into something usable here
+        if (cborValue.length < 6) throw "Invalid CBOR object"
+
+        //  Protected values
+        if (cborValue[0] == null) this.objProtected = {};
+        else this.objProtected = CBOR.decode(cborValue[0]);
+
+        if (cborValue[1] == null) this.objUnprotected = {};
+        else this.objUnprotected = cborValue[1];
+
+        this.iv = cborValue[2];
+
+        this.aad = cborValue[3];
+
+        this.cipherText = cborValue[4];
+
+        if (cborValue.length == 6) {
+            if (cborValue[5] == null) {
+            }
+            else {
+                this.recipientList = cborValue[5].map(function(r) {
+                    var recip = new Recipient();
+                    recip.DecodeFromCBOR(r);
+                    return recip;
+                });
+            }
+        }
+        else {
+            var recip = new Recipient();
+            recip.DecodeFromCBOR(cborValue.slice(5));
+            this.recipientList.push(recip);
+        }
+    },
+
+    Decrypt: function(key) {
+        //  Try and decode the recipients
+
+        var alg = this.FindAttribute("alg");
+        var cbitKey = 0;
+        var cekAlgorithm;
+        var cekAlgImport;
+        
+        switch (alg) {
+            case "A128GCM": cbitKey = 128; break;
+            case "A192GCM": cbitKey = 192; break;
+            case "A256GCM": cbitKey = 256; break;
+            default:
+            throw "Unknown content encryption algorithm";
+        }
+
+        switch (alg) {
+        case "A128GCM":
+        case "A192GCM":
+        case "A256GCM":
+            cekAlgorithm = {
+                "name": "AES-GCM",
+                "iv": this.iv
+            };
+            cekAlgImport = { "name" : "AES-GCM" };
+            break;
+        }
+            
+
+        var promises = this.recipientList.map(function(r) {
+            return r.Decrypt(key, cbitKey, cekAlgImport);
+        });
+        
+        var that = this;
+        return Promise.all(promises).then(
+            function (cekKey) {
+                console.log("cekKey");
+                console.log(cekKey);
+                return window.crypto.subtle.decrypt(cekAlgorithm, cekKey[0], that.cipherText);
+            }
+        ).then(function(value) {
+            that.plainText = value;
+            return value; 
+        });
+    },
+
     EncodeToBytes: function() {
-        var promise = EncodeToCBOR();
-        return promise.then(function(val) { resolve(CBOR.encode(val)); } );
+        var promise = this.EncodeToCBOR();
+        return promise.then(
+            function(val) {
+                return CBOR.encode(val); } );
     },
 
     EncodeToCBOR: function() { //  method that turns the structure into CBOR
-        var cborValue = [];
+        var that = this;
+
+        function _fillArray() {
+            var cborValue = [];
+
+            if (Object.keys(this.objProtected).length == 0) cborValue[0] = null;
+            else cborValue[0] = CBOR.encode(this.objProtected);
+
+            if (Object.keys(this.objUnprotected).length > 0) cborValue[1] = this.objUnprotected;
+            else cborValue[1] = null;                            
+
+            cborValue[2] = this.iv;
+
+            cborValue[3] = this.aad;
+
+            cborValue[4] = this.cipherText;
+
+            if (this.recipientList.length == 1) {
+                var r = _fillArray.call(this.recipientList[0]);
+                cborValue.push.apply(cborValue, r);
+            }
+            else if (this.recipientList.length == 0) {
+                cborValue[5] = null;
+            }
+            else {
+                cborValue[5] = this.recipientList.map(function(r){ return fillArray.call(r); });
+            }
+
+            return cborValue;
+            
+        }
 
         var promiseEncrypt = null;
 
         if (this.cipherText == null) promiseEncrypt = this.Encrypt();
         else {
-            promiseEncrypt = new Promise();
-            promiseEncrypt.resolve(true);
+            promiseEncrypt = new Promise(function(myResolve, MyReject){ myResolve(true); });
         }
+        
 
-        var that = this;
-        return promiseEncrypt.then(function() {
-            if (Object.keys(that.objProtected).length == 0) cborValue[0] = null;
-            else cborValue[0] = CBOR.encode(that.objProtected);
-
-            if (Object.keys(that.objUnprotected).length > 0) cborValue[1] = that.objUnprotected;
-            else cborValue[1] = null;                            
-
-            cborValue[2] = that.iv;
-
-            cborValue[3] = that.aad;
-
-            cborValue[4] = that.cipherText;
-
-            if (that.recipientList.length == 1) {
-                var r = that.recipientList[0].EncodeToCBOR();
-                cborValue.push.apply(cborValue, r);
-            }
-            else if (that.recipientList.length == 0) {
-                cborValue[5] = null;
-            }
-            else {
-                cborValue[5] = [];
-                for (var recipient in that.recipientList) {
-                    cborValue[5].push(recipient.EncodeToCBOR());
-                }
-            }
-
-            return cborValue;
-        });
+        return promiseEncrypt.then(function() { return _fillArray.call(that);});
     },
 
     Encrypt: function() {
@@ -128,12 +211,11 @@ EncryptMessage.prototype = {
         var promiseRet = new Promise(function(myResolve, myReject) {
 
             promise.then( function(aCEK) {
-                var recips = [];
-                for (var i=0; i<that.recipientList.length; i++) {
-                    recips.push(that.recipientList[i].Encrypt(that.cek));
-                }
-                if (recips.length == 0) myResolve(true);
-                else Promise.all(recips).then(function(recipVals) {
+                if (that.recipientList.length == 0) { myResolve(true); return; }
+
+                var recips = that.recipientList.map(function(r){ return r.Encrypt(that.cek); });
+
+                Promise.all(recips).then(function(recipVals) {
                     myResolve(true);
                 }, function(val) { myReject(val); });
             }, function(val) { myReject(val); });
@@ -178,10 +260,12 @@ EncryptMessage.prototype = {
                 that.cek = aesKey;
                 return window.crypto.subtle.encrypt(aesAlgorithmEncrypt, aesKey, that.plainText );
             }
-        ).then(function(value) {that.cipherText = value; return value;},
-               console.error.bind(console, "Unable to encrypt"));        
+        ).then(function(value) {
+            that.cipherText = value; 
+            that.iv = aesAlgorithmEncrypt["iv"];
+            return value;
+        });
     }
-
 }
 
 var Recipient = function(key, algorithm) {
@@ -192,6 +276,29 @@ var Recipient = function(key, algorithm) {
 
 Recipient.prototype = Object.create(EncryptMessage.prototype);
 
+Recipient.prototype.Decrypt = function(key, cbitKey, cekAlgorithm) {
+    var that = this;
+    var kekAlg = this.FindAttribute("alg");
+    var importAlgorithm;
+    var wrapAlgorithm;
+
+    switch (kekAlg) {
+    case "RSA-OAEP-256":
+        importAlgorithm = {"name":"RSA-OAEP", "hash":{ "name":"SHA-256"}};
+        wrapAlgorithm = {"name":"RSA-OAEP"};
+        break;
+
+    default:
+        throw "Unrecognized algorithm";
+    }
+
+    return window.crypto.subtle.importKey("jwk", key, importAlgorithm, false, ["decrypt", "unwrapKey"]).then (
+        function(kekKey) {
+            return window.crypto.subtle.unwrapKey("raw", that.cipherText, kekKey, wrapAlgorithm, cekAlgorithm, false, ["decrypt"]);
+        }
+    );
+}
+
 Recipient.prototype.Encrypt = function(cek) {
     var that = this;
 
@@ -201,7 +308,7 @@ Recipient.prototype.Encrypt = function(cek) {
 
     switch (alg) {
     case "RSA-OAEP-256":
-        importAlgorithm = { "name":"RSA-OAEP", "hash":"SHA-256"};
+        importAlgorithm = { "name":"RSA-OAEP", "hash":{ "name":"SHA-256"}};
         wrapAlgorithm = {"name":"RSA-OAEP"};
         break;
 
@@ -209,16 +316,24 @@ Recipient.prototype.Encrypt = function(cek) {
         throw "Unrecognized algorithm";
     }
 
-    var that = this;
-    return window.crypto.subtle.importKey("jwk", this.key, importAlgorithm, false, ["encrypt"]).then(
-        function(kekKey) {
-            return window.crypto.subtle.wrapKey("raw", cek, kekKey, that.wrapAlgorithm);
+    return new Promise(
+        function(myResolve, myReject)
+        {
+            window.crypto.subtle.importKey("jwk", that.key, importAlgorithm, false, ["encrypt", "wrapKey"]).then(
+                function(kekKey) {
+                    return window.crypto.subtle.wrapKey("raw", cek, kekKey, wrapAlgorithm);
+                }
+            ).then(
+                function(val) { 
+                    that.cipherText = val;
+                    myResolve(val);
+                    return val;
+                },
+                function(val) { 
+                    myReject(val);
+                    return val;
+                }
+            )
         }
-    ).then(
-        function(val) { 
-            that.cipherText = val;
-            console.log("Successful wrap"); return val;},
-        function(val) { 
-            console.error.bind("Failed wrap"); return val;});
-
+    );
 }

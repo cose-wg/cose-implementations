@@ -147,6 +147,11 @@
                                            } else if (value instanceof Uint8Array) {
                                                writeTypeAndLength(2, value.length);
                                                writeUint8Array(value);
+                                               
+                                           } else if (value instanceof ArrayBuffer) {
+                                               var array = new Uint8Array(value);
+                                               writeTypeAndLength(2, array.length);
+                                               writeUint8Array(array);
                                            } else {
                                                var keys = Object.keys(value);
                                                length = keys.length;
