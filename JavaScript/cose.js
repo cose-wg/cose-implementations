@@ -124,8 +124,6 @@ EncryptMessage.prototype = {
         var that = this;
         return Promise.all(promises).then(
             function (cekKey) {
-                console.log("cekKey");
-                console.log(cekKey);
                 return window.crypto.subtle.decrypt(cekAlgorithm, cekKey[0], that.cipherText);
             }
         ).then(function(value) {
@@ -157,7 +155,7 @@ EncryptMessage.prototype = {
 
             cborValue[3] = this.aad;
 
-            cborValue[4] = this.cipherText;
+            cborValue[4] = new Uint8Array(this.cipherText);
 
             if (this.recipientList.length == 1) {
                 var r = _fillArray.call(this.recipientList[0]);
@@ -231,7 +229,7 @@ EncryptMessage.prototype = {
     },
     SetContent: function(content) {
         if ((typeof content == "string") || (content instanceof String)) {
-            this.plainText = Utf8.str2ab(Utf8.encode(content));
+            this.plainText = Utf8.encode(content);
         }
         else if ((content instanceof Int8Array) || (content instanceof Uint8Array)) {
             this.plainText = content;
