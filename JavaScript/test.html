@@ -40,7 +40,27 @@ button.addEventListener("click", function(){
       "qi": "FZhClBMywVVjnuUud-05qd5CYU0dK79akAgy9oX6RX6I3IIIPckCciRrokxglZn-omAY5CnCe4KdrnjFOT5YUZE7G_Pg44XgCXaarLQf4hl80oPEf6-jJ5Iy6wPRx7G2e8qLxnh9cOdf-kRqgOS3F48Ucvw3ma5V6KGMwQqWFeV31XtZ8l5cVI-I3NzBS7qltpUVgz2Ju021eyc7IlqgzR98qKONl27DuEES0aK0WE97jnsyO27Yp88Wa2RiBrEocM89QZI1seJiGDizHRUP4UZxw9zsXww46wy0P6f9grnYp7t8LkyDDk8eoI4KX6SNMNVcyVS9IWjlq8EzqZEKIA"
     };
 
-  x.AddRecipient(new Recipient(RSA_key, "RSA-OAEP-256"));
+  var EC_private = {
+     "kty": "EC",
+     "kid": "meriadoc.brandybuck@buckland.example",
+     "use": "enc",
+     "crv": "P-256",
+     "x": "Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0",
+     "y": "HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw",
+     "d": "r_kHyZ-a06rmxM3yESK84r1otSg-aQcVStkRhA-iCM8"
+   }    ;
+
+   var EC_public = {
+     "kty": "EC",
+//     "kid": "meriadoc.brandybuck@buckland.example",
+     "use": "enc",
+     "crv": "P-256",
+     "x": "Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0",
+     "y": "HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw",
+   };
+
+  // x.AddRecipient(new Recipient(RSA_key, "RSA-OAEP-256"));
+  x.AddRecipient(new Recipient(EC_public, "ECDH-ES+A128KW"));
 
   var b = x.EncodeToCBOR();
   b.then(
