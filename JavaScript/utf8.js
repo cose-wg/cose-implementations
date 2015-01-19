@@ -74,5 +74,20 @@ var Utf8 = {
             str += " ";
         }
         return str;
+    },
+    b64toU8: function(buf) {
+        buf = buf.split("-").join("+");
+        buf = buf.split("_").join("/");
+
+        var u8_2 = new Uint8Array(atob(buf).split("").map(function(c) { return c.charCodeAt(0); }));
+        return u8_2;
+    },
+    U8toB64: function(buf) {
+        var ba = btoa(String.fromCharCode.apply(null, buf));
+        ba = ba.split("+").join("-");
+        ba = ba.split("/").join("_");
+        ba = ba.split("=");
+        return ba[0];
     }
-}
+};
+
