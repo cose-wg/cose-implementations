@@ -1,4 +1,4 @@
-<html lang="en">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
    <title>Test page for the COSE encryption library</title>
    <script type='text/javascript' src="./cbor.js"></script>
@@ -43,7 +43,8 @@ button.addEventListener("click", function(){
   var EC_private = {
      "kty": "EC",
      "kid": "meriadoc.brandybuck@buckland.example",
-     "use": "enc",
+     "alg": "ECDH-ES+A128KW",
+//     "use": "enc",
      "crv": "P-256",
      "x": "Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0",
      "y": "HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw",
@@ -53,7 +54,7 @@ button.addEventListener("click", function(){
    var EC_public = {
      "kty": "EC",
 //     "kid": "meriadoc.brandybuck@buckland.example",
-     "use": "enc",
+//     "use": "enc",
      "crv": "P-256",
      "x": "Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0",
      "y": "HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw",
@@ -70,14 +71,15 @@ button.addEventListener("click", function(){
         
         var c = new EncryptMessage();
         c.DecodeFromCBOR(val);
-        c.Decrypt(RSA_key_priv).then(
+//        c.Decrypt(RSA_key_priv).then(
+        c.Decrypt(EC_private).then(
            function(val2) {
               console.log("Success: ", Utf8.ab2hex(val2));
            },
-           console.error.bind("Failure: ")
+           console.log.bind(console, "Failure")
         );
      },
-     console.error.bind("Failure: ")
+     console.error.bind(console, "Failure: ")
   );
 });
 </script>

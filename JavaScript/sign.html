@@ -36,9 +36,30 @@ button.addEventListener("click", function(){
         "e": "AQAB",
   };
 
+   var ECDSA_public = {
+     "kty": "EC",
+     "kid": "bilbo.baggins@hobbiton.example",
+     "use": "sig",
+     "crv": "P-521",
+     "x": "AHKZLLOsCOzz5cY97ewNUajB957y-C-U88c3v13nmGZx6sYl_oJXu9A5RkTKqjqvjyekWF-7ytDyRXYgCF5cj0Kt",
+     "y": "AdymlHvOiLxXkEhayXQnNCvDX4h9htZaCJN34kfmC6pV5OhQHiraVySsUdaQkAgDPrwQrJmbnX9cwlGfP-HqHZR1"
+   };
+
+   var ECDSA_private = {
+     "kty": "EC",
+     "kid": "bilbo.baggins@hobbiton.example",
+     "use": "sig",
+     "crv": "P-521",
+     "x": "AHKZLLOsCOzz5cY97ewNUajB957y-C-U88c3v13nmGZx6sYl_oJXu9A5RkTKqjqvjyekWF-7ytDyRXYgCF5cj0Kt",
+     "y": "AdymlHvOiLxXkEhayXQnNCvDX4h9htZaCJN34kfmC6pV5OhQHiraVySsUdaQkAgDPrwQrJmbnX9cwlGfP-HqHZR1",
+     "d": "AAhRON2r9cqXX1hg-RoI6R1tX5p2rUAYdmpHZoC1XNM56KtscrX6zbKipQrCW9CGZH3T4ubpnoTKLDYJ_fF3_rJt"
+   };
+
   var x = new SignMessage("This is content");
 
   x.AddSigner(new Signer(RSA_sign, "RS256"));
+  x.AddSigner(new Signer(RSA_sign, "PS256"));
+  x.AddSigner(new Signer(ECDSA_private, "ES521"));
 
   var b = x.EncodeToCBOR();
   b.then(
@@ -50,14 +71,22 @@ button.addEventListener("click", function(){
         c.DecodeFromCBOR(val);
         c.Verify(RSA_verify).then(
            function(val2) {
-              console.log("Success: ", val2);
+              console.log("Success RSA: ", val2);
            },
            function (val3) {
-              console.log("Success: ", val3);
+              console.log("Faiure RSA: ", val3);
+           }
+        );
+        c.Verify(ECDSA_public).then(
+           function(val2) {
+              console.log("Success EC: ", val2);
+           },
+           function (val3) {
+              console.log("Failure EC: ", val3);
            }
         );
      },
-     console.error.bind("Failure: ")
+     console.error.bind(console, "Failure: ")
   );
 });
 </script>

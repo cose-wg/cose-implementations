@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2014 James Schaad <ietf@augustcellars.com>
  */
-
+"use strict";
 
 var EncryptMessage = function(content) {
 
@@ -124,7 +124,13 @@ EncryptMessage.prototype = {
         var that = this;
         return Promise.all(promises).then(
             function (cekKey) {
-                return window.crypto.subtle.decrypt(cekAlgorithm, cekKey[0], that.cipherText);
+                var i;
+                for (i=0; i<cekKey.length; i++) {
+                    if (cekKey[i] instanceof CryptoKey) {
+                        return window.crypto.subtle.decrypt(cekAlgorithm, cekKey[i], that.cipherText);
+                    }
+                }
+                return Promise.reject("No key matches");
             }
         ).then(function(value) {
             that.plainText = value;
@@ -293,60 +299,74 @@ Recipient.prototype.Decrypt = function(key, cbitKey, cekAlgorithm) {
     var wrapAlgorithm;
     var importPublicAlgorithm;
     var importPrivateAlgorithm;
+    var deriveAlgorithm;
 
 
     function keyAgree()
     {
         var kaPrivate;
 
-        return window.crypto.subtle.importKey("jwk", that.key, importPrivateAlgorithm, false, ["deriveKey", "deriveBits"]).then (
+        return window.crypto.subtle.importKey("jwk", key, importPrivateAlgorithm, false, ["deriveKey", "deriveBits"]).then (
             function(kekKey) {
                 kaPrivate = kekKey;
-                return window.crypto.subtle.importKey("jwk", that.FindAlgorithm("epk"), importPublicAlgorithm, false, ["deriveKey", "deriveBits"]);
-            }
-            , function(error) {
-                return error;
+                return window.crypto.subtle.importKey("jwk", cwk2jwk(that.FindAttribute("epk")), importPublicAlgorithm, false, []);
             }
         ).then (
             function(pubData) {
-                deriveAlgorithm["public"] = genkey;
-                return window.crypto.subtle.deriveKey(deriveAlgorithm, kaPrivate, wrapAlgorithm, true, ["unwrapKey"]);
-            }
-            , function(error) {
-                return error;
+                deriveAlgorithm["public"] = pubData;
+                return _deriveKey(deriveAlgorithm, kaPrivate, wrapAlgorithm, true, ["unwrapKey"]);
             }
         ).then (
             function(wrapKey) {
-                return window.crypto.subtle.unwrapKey("raw", that.cipherText, wrapKey, wrapAlgorithm, false, ["decrypt"]);
-            }
-            , function(error) {
-                return error;
+                return window.crypto.subtle.unwrapKey("raw", that.cipherText, wrapKey, wrapAlgorithm, cekAlgorithm, false, ["decrypt"]);
             }
         );
     }
 
-    switch (kekAlg) {
-    case "RSA-OAEP-256":
-        importAlgorithm = {"name":"RSA-OAEP", "hash":{ "name":"SHA-256"}};
-        wrapAlgorithm = {"name":"RSA-OAEP"};
-        break;
+    return new Promise(function (myResolve, myReject) {
+        var prom;
+        
+        switch (kekAlg) {
+        case "RSA-OAEP-256":
+            if (key["kty"] != "RSA") {
+                myResolve(null);
+                return null;
+            }
+            importAlgorithm = {"name":"RSA-OAEP", "hash":{ "name":"SHA-256"}};
+            wrapAlgorithm = {"name":"RSA-OAEP"};
+            prom = window.crypto.subtle.importKey("jwk", key, importAlgorithm, false, ["decrypt", "unwrapKey"]).then (
+                function(kekKey) {
+                    return window.crypto.subtle.unwrapKey("raw", that.cipherText, kekKey, wrapAlgorithm, cekAlgorithm, false, ["decrypt"]);
+                }
+            );
+            break;
 
-    case "ECDH-ES+A128KW":
-        importPrivateAlgorithm = { "name":"ECDH", "namedCurve":this.key["crv"] };
-        generatePublicAlgorithm = { "name":"ECDH", "namedCurve":this.key["crv"] };
-        deriveAlgorithm = this._buildConcat(alg, 128);
-        wrapAlgorithm = {"name":"AES-KW", "length":"128"};
-        return keyAgree();
+        case "ECDH-ES+A128KW":
+            if (key["kty"] != "EC") {
+                myResolve(null);
+                return null;
+            }
+            importPrivateAlgorithm = { "name":"ECDH", "namedCurve":key["crv"] };
+            importPublicAlgorithm = { "name":"ECDH", "namedCurve":key["crv"] };
+            deriveAlgorithm = that._buildConcat(kekAlg, 128);
+            wrapAlgorithm = {"name":"AES-KW", "length":128};
+            prom = keyAgree();
+            break;
 
-    default:
-        throw "Unrecognized algorithm";
-    }
-
-    return window.crypto.subtle.importKey("jwk", key, importAlgorithm, false, ["decrypt", "unwrapKey"]).then (
-        function(kekKey) {
-            return window.crypto.subtle.unwrapKey("raw", that.cipherText, kekKey, wrapAlgorithm, cekAlgorithm, false, ["decrypt"]);
+        default:
+            myResolve(null);
+            break;
         }
-    );
+
+        return prom.then(
+            function(val) {
+                myResolve(val);
+            },  
+            function(val) {
+                myResolve(null);
+            }
+        );
+    });
 };
 
 
@@ -382,6 +402,39 @@ Recipient.prototype._buildConcat = function(alg, cbitKey)
     return deriveAlgorithm;
 };
 
+function _deriveKey(deriveAlgorithm, privateKey, wrapAlgorithm, exportable, usages)
+{
+    if (deriveAlgorithm["name"] != "CONCAT") return window.crypto.subtle.deriveKey(deriveAlgorithm, privateKey, wrapAlgorithm, exportable, usages);
+
+    return window.crypto.subtle.deriveBits({"name":"ECDH", "public":deriveAlgorithm["public"]}, privateKey, null).then (
+        function(secret) {
+            //  Build the buffer is a pain
+            var f = [];
+            f.push(new Uint8Array([0, 0, 0, 1]));
+            f.push(new Uint8Array(secret));
+            f.push(deriveAlgorithm["algorithmId"]);
+            f.push(deriveAlgorithm["partyUInfo"]);
+            f.push(deriveAlgorithm["partyVInfo"]);
+            f.push(deriveAlgorithm["publicInfo"]);
+            var i;
+            var l = 0;
+            for (i=0; i<f.length; i++) l += f[i].length;
+            var rgbData = new Uint8Array(l);
+            l = 0;
+            for (i=0; i<f.length; i++) {
+                rgbData.set(f[i], l);
+                l += f[i].length;
+            }
+
+            return window.crypto.subtle.digest({"name":"SHA-256"}, rgbData);
+        }
+    ).then(
+        function(digest) {
+            digest = digest.slice(wrapAlgorithm["length"]/8);
+            return window.crypto.subtle.importKey("raw", digest, wrapAlgorithm, true, usages);
+        }
+    );
+};
 
 Recipient.prototype.Encrypt = function(cek) {
     var that = this;
@@ -394,44 +447,29 @@ Recipient.prototype.Encrypt = function(cek) {
     {
         var kaPrivate;
 
-        return window.crypto.subtle.importKey("jwk", that.key, importAlgorithm, false, ["deriveKey", "deriveBits"]).then (
+        return window.crypto.subtle.importKey("jwk", that.key, importAlgorithm, false, []).then (
             function(kekKey) {
                 deriveAlgorithm["public"] = kekKey;
                 return window.crypto.subtle.generateKey(generateAlgorithm, true, ["deriveKey", "deriveBits"]);
-            }
-            , function(error) {
-                return error;
             }
         ).then (
             function(genKey) {
                 kaPrivate = genKey;
                 return window.crypto.subtle.exportKey("jwk", genKey.publicKey);
             }
-            , function(error) {
-                return error;
-            }
         ).then (
             function(pubData) {
-                that.AddUnprotected("epk", pubData);
-                return window.crypto.subtle.deriveKey(deriveAlgorithm, kaPrivate, wrapAlgorithm, true, ["wrapKey"]);
-            }
-            , function(error) {
-                return error;
+                that.AddUnprotected("epk", jwk2cwk(pubData, true));
+                return _deriveKey(deriveAlgorithm, kaPrivate.privateKey, wrapAlgorithm, true, ["wrapKey"]);
             }
         ).then (
             function(wrapKey) {
                 return window.crypto.subtle.wrapKey("raw", cek, wrapKey, wrapAlgorithm);
             }
-            , function(error) {
-                return error;
-            }
         ).then (
             function(val) {
                 that.cipherText = val;
                 return val;
-            }
-            , function(error) {
-                return error;
             }
         );
     }
@@ -471,7 +509,7 @@ Recipient.prototype.Encrypt = function(cek) {
         importAlgorithm = { "name":"ECDH", "namedCurve":this.key["crv"] };
         generateAlgorithm = { "name":"ECDH", "namedCurve":this.key["crv"] };
         deriveAlgorithm = this._buildConcat(alg, 128);
-        wrapAlgorithm = {"name":"AES-KW", "length":"128"};
+        wrapAlgorithm = {"name":"AES-KW", "length":128};
         return keyAgree();
 
     default:
@@ -688,14 +726,19 @@ Signer.prototype = {
         var alg = this.FindAttribute("alg");
 
         switch (alg) {
+        case "ES521":
+            signParameters = {"name":"ECDSA", "hash":{"name":"SHA-512"}};
+            importAlg = {"name":"ECDSA", "namedCurve":this.key["crv"]};
+            break;
+
         case "RS256":
             signParameters = {"name":"RSASSA-PKCS1-v1_5"};
             importAlg = {"name":"RSASSA-PKCS1-v1_5", "hash":{"name":"SHA-256"}};
             break;
 
         case "PS256":
-            signParameters = {"name":"RSA-PSS"};
-            importAlg = {"name":"RSA-PSS", "hash":{"name":"SHA-1"}};
+            signParameters = {"name":"RSA-PSS", "saltLength":256/8};
+            importAlg = {"name":"RSA-PSS", "hash":{"name":"SHA-256"}};
             break;
 
         default:
@@ -723,6 +766,11 @@ Signer.prototype = {
         var that = this;
         var cborValue = [];
 
+        function _falsePromise()
+        {
+            return new Promise(function(myResolve, myReject) { myResolve(false); });
+        };
+
         if (Object.keys(message.objProtected).length === 0) cborValue[0] = null;
         else cborValue[0] = CBOR.encode(mesasge.objProtected);
 
@@ -737,25 +785,36 @@ Signer.prototype = {
         var importAlg;
 
         var alg = this.FindAttribute("alg");
+        if (key["alg"] !== undefined) {
+            if (key["alg"] != alg) return _falsePromise();
+        }
 
         switch (alg) {
+        case "ES521":
+            if (key["kty"] != "EC") return _falsePromise();
+            signParameters = {"name":"ECDSA", "hash":{"name":"SHA-512"}};
+            importAlg = {"name":"ECDSA", "namedCurve":key["crv"]};
+            break;
+
         case "RS256":
+            if (key["kty"] != "RSA") return _falsePromise();
             signParameters = {"name":"RSASSA-PKCS1-v1_5"};
             importAlg = {"name":"RSASSA-PKCS1-v1_5", "hash":{"name":"SHA-256"}};
             break;
 
         case "PS256":
-            signParameters = {"name":"RSA-PSS"};
-            importAlg = {"name":"RSA-PSS", "hash":{"name":"SHA-1"}};
+            if (key["kty"] != "RSA") return _falsePromise();
+            signParameters = {"name":"RSA-PSS", "saltLength":256/8};
+            importAlg = {"name":"RSA-PSS", "hash":{"name":"SHA-256"}};
             break;
 
         default:
-            throw "Unknown signature algorithm";
+            return _falsePromise();
         }
 
-//        if (this.key instanceof CryptoKey) {
-//            return window.crypto.subtle.sign(signParameters, this.key, data);
-//        }
+        if (this.key instanceof CryptoKey) {
+            return window.crypto.subtle.sign(signParameters, this.key, data);
+        }
 
         return window.crypto.subtle.importKey("jwk", key, importAlg, false, ["verify"]).
             then(
@@ -779,3 +838,125 @@ Signer.prototype = {
     }
 
 };
+
+function jwk2cwk(jwkIn, ephemeral)
+{
+    if ((ephemeral === null) || (ephemeral == undefined)) ephemeral = false;
+    else if (typeof ephemeral != "boolean") throw "Incorrect type for ephemeral";
+
+    var cwk = {};
+    var kty = jwkIn["kty"];
+
+    for (var key in jwkIn) {
+        if (jwkIn.hasOwnProperty(key)) {
+            if (ephemeral) {
+                switch (key) {
+                case "kty":
+                case "crv":
+                case "x":
+                case "y":
+                    break;
+
+                default:
+                    continue;
+                    break;
+                }
+            }
+        }
+
+        switch (key) {
+        case "kty":
+        case "use":
+        case "key_ops":
+        case "alg":
+        case "kid":
+            cwk[key] = jwkIn[key];
+            break;
+
+        case "x5u":
+        case "x5t":
+        case "x5t#S256":
+            cwk[key] = Utf8.b64toU8(jwkIn[key]);
+            break;
+
+        case "x5c":
+            break;
+
+        default:
+            switch (kty) {
+            case "RSA":
+                switch (key) {
+                case "n":
+                case "e":
+                case "d":
+                case "p":
+                case "q":
+                case "dp":
+                case "dq":
+                case "qi":
+                    cwk[key] = Utf8.b64toU8(jwkIn[key]);
+                    break;
+
+                default:
+                    cwk[key] = jwkIn[key];
+                    break;
+                }
+                break;
+
+            case "EC":
+                switch (key) {
+                case "x":
+                case "y":
+                    cwk[key] = Utf8.b64toU8(jwkIn[key]);
+                    break;
+
+                case "crv":
+                default:
+                    cwk[key] = jwkIn[key];
+                    break;
+                }
+                break;
+
+            case "oct":
+                switch (key) {
+                case "k":
+                    cwk[key] = Utf8.b64toU8(jwkIn[key]);
+                    break;
+
+                default:
+                    cwk[key] = jwkIn[key];
+                    break;
+                }
+                break;
+
+            default:
+                throw "Invalid structure for key";
+            }
+            break;
+        }
+    }
+
+    return cwk;
+}
+
+function cwk2jwk(cwkIn)
+{
+    var jwk = {};
+    for (var key in cwkIn) {
+        if (cwkIn.hasOwnProperty(key)) {
+            var val = cwkIn[key];
+
+            if (val instanceof ArrayBuffer) {
+                jwk[key] = Utf8.U8toB64(new Uint8Array(val));
+            }
+            else if (val instanceof Uint8Array) {
+                jwk[key] = Utf8.U8toB64(val);
+            }
+            else {
+                jwk[key] = val;
+            }
+        }
+    }
+
+    return jwk;
+}

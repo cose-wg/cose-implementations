@@ -162,6 +162,7 @@
                                                    encodeItem(value[key]);
                                                }
                                            }
+                                           return null;
                                        }
                                    }
                                    encodeItem(value);
@@ -364,6 +365,8 @@
                                            default:
                                                return simpleValue(length);
                                            }
+                                       default:
+                                           throw "Invalid major type";
                                        }
                                    }
                                    var ret = decodeItem();
