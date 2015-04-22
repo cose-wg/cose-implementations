@@ -92,7 +92,7 @@ namespace COSE
             CBORObject obj3;
 
             obj = CBORObject.NewArray();
-            obj.Add(1);  // Tag as an encrypt item
+            obj.Add(2);  // Tag as an encrypt item
 
             obj3 = EncodeToCBORObject();
 
@@ -300,8 +300,9 @@ namespace COSE
             }
 
             ContentKey = new KeyParameter(K);
-            
 
+            //  Build the object to be hashed
+            
             byte[] A = new byte[0];
             if (objProtected != null) {
                 A = objProtected.EncodeToBytes();
@@ -357,6 +358,7 @@ namespace COSE
     {
         RecipientType m_recipientType;
         Key m_key;
+        Key m_senderKey;
 
         public Recipient(Key key, string algorithm = null)
         {
@@ -368,6 +370,9 @@ namespace COSE
                     break;
 
                 case "ECDH-ES":
+#if DEBUG
+                case "ECDH-SS":
+#endif // DEBUG
                     if (key.AsString("kty") != "EC") throw new Exception("Invalid Parameters");
                     m_recipientType = RecipientType.keyAgreeDirect;
                     break;
@@ -553,6 +558,7 @@ namespace COSE
             switch (alg) {
             case "dir":
             case "ECDH-ES":
+            case "ECDH-SS":
                 break;
 
             case "A128KW": AES_KeyWrap(128); break;
@@ -705,9 +711,26 @@ namespace COSE
 
                     return KDF(rgbSecret, cbitKey, alg);
                 }
+
+            case "ECDH-SS": {
+                    if (m_key.AsString("kty") != "EC") throw new Exception("Key and key managment algorithm don't match");
+                    if (FindAttribute("apu") == null) {
+                        byte[] rgbAPU = new byte[512 / 8];
+                        s_PRNG.NextBytes(rgbAPU);
+                        AddUnprotected("apu", CBORObject.FromObject(rgbAPU));
+                    }
+                    byte[] rgbSecret = ECDH_GenerateSecret(m_key);
+                    return KDF(rgbSecret, cbitKey, alg);
+                }
+
             }
          
             throw new Exception("NYI");
+        }
+
+        public void SetSenderKey(COSE.Key senderKey)
+        {
+            m_senderKey = senderKey;
         }
 
         private void AES_KeyWrap(int keySize, byte[] rgbKey = null)
@@ -860,10 +883,18 @@ namespace COSE
 
         private byte[] ECDH_GenerateSecret(Key key)
         {
+            Key epk;
+
             if (key.AsString("kty") != "EC") throw new Exception("Not an EC Key");
-            CBORObject epkT = FindAttribute("epk");
+
+            if (m_senderKey != null) {
+                epk = m_senderKey;
+            }
+            else {
+                CBORObject epkT = FindAttribute("epk");
                 if (epkT == null) throw new Exception("No Ephemeral key");
-            Key epk = new Key(epkT);
+                epk = new Key(epkT);
+            }
 
             if (epk.AsString("crv") != key.AsString("crv")) throw new Exception("not a match of curves");
 

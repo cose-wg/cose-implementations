@@ -1,0 +1,66 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+using Org.BouncyCastle.Crypto.Prng;
+using Org.BouncyCastle.Security;
+
+namespace examples
+{
+    public class StaticPrng :  IRandomGenerator
+    {
+        byte[] m_rgbRngData = new byte[0];
+        int m_iRngData;
+        SecureRandom m_prng = null;
+        bool m_fDirty = false;
+
+        /// <summary>Add more seed material to the generator.</summary>
+        /// <param name="seed">A byte array to be mixed into the generator's state.</param>
+        public void AddSeedMaterial(byte[] seed)
+        {
+            m_rgbRngData = seed;
+            m_iRngData = 0;
+        }
+
+        /// <summary>Add more seed material to the generator.</summary>
+        /// <param name="seed">A long value to be mixed into the generator's state.</param>
+        public void AddSeedMaterial(long seed)
+        {
+            throw new Exception("Don't call this function");
+        }
+
+        /// <summary>Fill byte array with random values.</summary>
+        /// <param name="bytes">Array to be filled.</param>
+        public void NextBytes(byte[] bytes)
+        {
+            NextBytes(bytes, 0, bytes.Length);
+        }
+
+        /// <summary>Fill byte array with random values.</summary>
+        /// <param name="bytes">Array to receive bytes.</param>
+        /// <param name="start">Index to start filling at.</param>
+        /// <param name="len">Length of segment to fill.</param>
+        public void NextBytes(byte[] bytes, int start, int len)
+        {
+
+            if (m_iRngData + len > m_rgbRngData.Length) {
+                if (m_prng == null) m_prng = new SecureRandom();
+
+                int cbOld = m_rgbRngData.Length;
+                Array.Resize(ref m_rgbRngData, m_iRngData + len);
+                m_prng.NextBytes(m_rgbRngData, cbOld, m_rgbRngData.Length - cbOld);
+                m_fDirty = true;
+            }
+
+            Array.Copy(m_rgbRngData, m_iRngData, bytes, start, len);
+            m_iRngData += len;
+
+        }
+
+        public byte[] buffer { get { return m_rgbRngData; } }
+        public bool IsDirty { get { return m_fDirty; } }
+        public void Reset() { m_iRngData = 0; }
+    }
+}

@@ -31,12 +31,19 @@ namespace COSE
             signerList.Add(sig);
         }
 
+        public byte[] BEncodeToBytes()
+        {
+            CBORObject obj2 = BEncodeToCBORObject();
+
+            return obj2.EncodeToBytes();
+        }
+
         override public byte[] EncodeToBytes()
         {
             CBORObject obj3;
 
             obj = CBORObject.NewArray();
-            obj.Add(0);  // Tag as an Signed item
+            obj.Add(1);  // Tag as an Signed item
 
             obj3 = EncodeToCBORObject();
 
@@ -45,15 +52,38 @@ namespace COSE
             return obj.EncodeToBytes();
         }
 
+        public CBORObject BEncodeToCBORObject()
+        {
+            CBORObject objX = EncodeToCBORObject();
+            CBORObject obj = CBORObject.NewMap();
+
+            if (objX[2] != null) obj[CBORObject.FromObject(1)] = objX[2];
+            if (objX[3] != null) {
+                CBORObject obj3 = CBORObject.NewArray();
+                obj[CBORObject.FromObject(2)] = obj3;
+                for (int i = 0; i < objX[3].Count; i++) {
+                    CBORObject obj2 = CBORObject.NewMap();
+                    obj3.Add(obj2);
+                    obj2[CBORObject.FromObject(3)] = objX[3][i][2];
+                    obj2[CBORObject.FromObject(4)] = objX[3][i][1];
+                    if (objX[3][i][0] != null) {
+                        obj2[CBORObject.FromObject(5)] = objX[3][i][0];
+                    }
+                }
+            }
+            return obj;
+        }
+
         public CBORObject EncodeToCBORObject()
         {
             CBORObject obj = CBORObject.NewArray();
 
-            if (objProtected != null) {
+            if ((objProtected != null) && (objProtected.Count > 0)) {
                 obj.Add(objProtected.EncodeToBytes());
             }
-            else obj.Add(objProtected);
-            obj.Add(objUnprotected); // Add unprotected attributes
+            else obj.Add(null);
+            if ((objUnprotected == null) || (objUnprotected.Count == 0)) obj.Add(null);
+            else obj.Add(objUnprotected); // Add unprotected attributes
 
             obj.Add(rgbContent);
 
@@ -154,11 +184,12 @@ namespace COSE
         {
             CBORObject obj = CBORObject.NewArray();
 
-            if (objProtected != null) {
+            if ((objProtected != null) && (objProtected.Count > 0)) {
                 obj.Add(objProtected.EncodeToBytes());
             }
             else obj.Add(objProtected);
-            obj.Add(objUnprotected); // Add unprotected attributes
+            if ((objUnprotected == null) || (objUnprotected.Count == 0)) obj.Add(null);
+            else obj.Add(objUnprotected); // Add unprotected attributes
 
             CBORObject signObj = CBORObject.NewArray();
             signObj.Add(bodyAttributes);
@@ -213,6 +244,7 @@ namespace COSE
                 default:
                     throw new Exception("Unknown or unsupported key type " + keyToSign.AsString("kty"));
                 }
+                objUnprotected.Add("alg", alg);
             }
 
             IDigest digest;
@@ -251,6 +283,7 @@ namespace COSE
             case "PS512":
                 {
                     PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
+                    
                     RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(ConvertBigNum(keyToSign.AsObject("n")), ConvertBigNum(keyToSign.AsObject("e")), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
 
                     signer.Init(true, prv);

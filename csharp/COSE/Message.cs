@@ -4,12 +4,23 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+using Org.BouncyCastle.Crypto.Prng;
+
 using PeterO.Cbor;
 
 namespace COSE
 {
     public abstract class Message : Attributes
     {
+        protected bool m_forceArray = false;
+
+        protected static Org.BouncyCastle.Crypto.Prng.IRandomGenerator s_PRNG = null;
+
+        public static void SetPRNG(IRandomGenerator prng)
+        {
+            s_PRNG = prng;
+        }
+
         public static Message DecodeFromBytes(byte[] messageData)
         {
             CBORObject messageObject = CBORObject.DecodeFromBytes(messageData);
@@ -29,12 +40,29 @@ namespace COSE
         }
 
         abstract public byte[] EncodeToBytes();
+
+        public void ForceArray(bool f)
+        {
+            m_forceArray = f;
+        }
     }
 
     public class Attributes
     {
         protected CBORObject objProtected = CBORObject.NewMap();
         protected CBORObject objUnprotected = CBORObject.NewMap();
+
+        public void AddAttribute(string name, string value, bool fProtected)
+        {
+            if (fProtected) AddProtected(name, value);
+            else AddUnprotected(name, value);
+        }
+
+        public void AddAttribute(string name, CBORObject value, bool fProtected)
+        {
+            if (fProtected) AddProtected(name, value);
+            else AddUnprotected(name, value);
+        }
 
         public void AddProtected(string name, string value)
         {
