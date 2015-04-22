@@ -8,7 +8,7 @@ Fill in what the rules are - however it should be something along the lines of -
 
 ## Available versions
 
-The initial version that is provided is wrtten in c#.  It is hoped that a JavaScript version wil appear as well.
+The initial version that is provided is wrtten in c#.  There is also a JavaScript version that does a partial implementation using the new WebCrypto API.
 
 ##  Test Vectors
 
