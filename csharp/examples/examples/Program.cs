@@ -591,6 +591,8 @@ namespace examples
             case "RSA-OAEP-256": return COSE.AlgorithmValues.RSA_OAEP_256;
             case "HS256": return COSE.AlgorithmValues.HMAC_SHA_256;
             case "HS512": return COSE.AlgorithmValues.HMAC_SHA_512;
+            case "ES256": return COSE.AlgorithmValues.ECDSA_256;
+            case "ES512": return COSE.AlgorithmValues.ECDSA_512;
                 
             default: return old;
             }

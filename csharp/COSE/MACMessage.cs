@@ -62,7 +62,7 @@ namespace COSE
             foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
 #endif
 
-            return obj3;
+            return obj;
         }
 
         public CBORObject Encode()

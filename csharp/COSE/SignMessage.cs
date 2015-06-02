@@ -90,7 +90,7 @@ namespace COSE
             foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
 #endif
 
-            return obj3;
+            return obj;
         }
 
         public CBORObject Encode()
@@ -280,23 +280,10 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "RS256":
-                    digest = new Sha256Digest();
-                    digest2 = new Sha256Digest();
-                    break;
-
-                case "RS384":
                 case "ES384":
                 case "PS384":
                     digest = new Sha384Digest();
                     digest2 = new Sha384Digest();
-                    break;
-
-                case "RS512":
-                case "ES512":
-                case "PS512":
-                    digest = new Sha512Digest();
-                    digest2 = new Sha512Digest();
                     break;
 
                 default:
