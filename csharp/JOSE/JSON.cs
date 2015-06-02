@@ -4,14 +4,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-using PeterO.Cbor;
-
-namespace examples
+namespace JOSE
 {
-#if USE_JOSE
-        public enum JsonType
+    public enum JsonType
     {
-        unknown = -1, map = 1, text = 2, array=3, number=4
+        unknown = -1, map = 1, text = 2, array = 3, number = 4
     }
 
     public class JSON
@@ -28,14 +25,37 @@ namespace examples
 
         }
 
+#if false
         public JSON(String text)
         {
             source = text;
             int used = Parse(0);
             if (used != text.Length) throw new Exception("Did not use entire string");
         }
+#endif
 
-        private void Clear()
+        public JSON(byte[] rgb)
+        {
+            nodeType = JsonType.text;
+            text = Message.base64urlencode(rgb);
+        }
+
+        public JSON(int iVal)
+        {
+            nodeType = JsonType.number;
+            number = iVal;
+        }
+
+        public static JSON Parse(string text)
+        {
+            JSON json = new JSON();
+            json.source = text;
+            int used = json.Parse(0);
+            if (used != text.Length) throw new Exception("Did not use entire string");
+            return json;
+        }
+
+        public void Clear()
         {
             switch (nodeType) {
             case JsonType.text: text = null; break;
@@ -74,8 +94,16 @@ namespace examples
                 offset += ParseArray(offset);
                 break;
 
-            case '0': case '1': case '2': case '3': case '4': case '5':
-            case '6': case '7': case '8': case '9':
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
                 offset += ParseNumber(offset);
                 break;
 
@@ -178,7 +206,7 @@ namespace examples
             }
 
             nodeType = JsonType.number;
-                number = value;
+            number = value;
 
             offset += SkipWhiteSpace(offset);
             return offset - offsetStart;
@@ -256,6 +284,12 @@ namespace examples
                 objJson.text = (string) obj;
                 return objJson;
             }
+            else if (obj.GetType() == typeof(byte[])) {
+                JSON objJson = new JSON();
+                objJson.nodeType = JsonType.text;
+                objJson.text = Message.base64urlencode((byte[]) obj);
+                return objJson;
+            }
             else {
                 throw new Exception("did not change the type of the result");
             }
@@ -289,7 +323,9 @@ namespace examples
 
         public bool ContainsKey(string key)
         {
-            return map.ContainsKey(key);
+            if (nodeType == JsonType.unknown) return false;
+            if (nodeType == JsonType.map) return map.ContainsKey(key);
+            throw new Exception("Can't ask if this element contains a key");
         }
 
         public void Remove(string key)
@@ -327,44 +363,19 @@ namespace examples
             return number;
         }
 
-        public CBORObject AsCbor()
+        public byte[] AsBytes()
         {
-            CBORObject obj;
-
-            switch (nodeType) {
-            case JsonType.array:
-                obj = CBORObject.NewArray();
-                foreach (KeyValuePair<string, JSON> pair in map) {
-                    obj.Add(pair.Key, pair.Value.AsCbor());
-                }
-                return obj;
-
-            case JsonType.map:
-                obj = CBORObject.NewMap();
-                foreach (KeyValuePair<string, JSON> pair in map) {
-                    obj.Add(pair.Key, pair.Value.AsCbor());
-                }
-                return obj;
-
-            case JsonType.number:
-                return CBORObject.FromObject(number);
-
-            case JsonType.text:
-                return CBORObject.FromObject(text);
-
-            case JsonType.unknown:
-            default:
-                throw new Exception("Can deal with unknown JSON node type");
-            }
-
-       
+            if (nodeType != JsonType.text) throw new Exception("Not a string");
+            return JOSE.Message.base64urldecode(text);
         }
 
-        public int Count()
+        public int Count
         {
-            if (nodeType == JsonType.array) return array.Count;
-            if (nodeType == JsonType.map) return map.Count;
-            return 1;
+            get {
+                if (nodeType == JsonType.array) return array.Count;
+                if (nodeType == JsonType.map) return map.Count;
+                return 0;
+            }
         }
 
         public string Set(string value)
@@ -376,7 +387,50 @@ namespace examples
             return value;
         }
 
-        public string Serialize(int depth=0)
+        public JSON Set(JSON value)
+        {
+            Clear();
+            nodeType = value.nodeType;
+            this.map = value.map;
+            this.array = value.array;
+            this.text = value.text;
+            this.number = value.number;
+            this.source = value.source;
+
+            return this;
+        }
+
+        public string Serialize(int depth = 0)
+        {
+            string tmp = "";
+
+            switch (nodeType) {
+            case JsonType.text:
+                return '"' + text.Replace("\n", "\\n").Replace("\"", "\\\"") + "\"";
+
+            case JsonType.number:
+                return number.ToString();
+
+            case JsonType.map:
+                tmp = "{\r\n";
+                foreach (KeyValuePair<string, JSON> pair in map) {
+                    tmp += indent(depth + 1) + '"' + pair.Key + "\": " + pair.Value.Serialize(depth + 1) + ",\r\n";
+                }
+                tmp = tmp.Substring(0, tmp.Length - 3) + "\r\n" + indent(depth) + "}";
+                return tmp;
+
+            case JsonType.array:
+                tmp = "[\r\n";
+                foreach (JSON value in array) {
+                    tmp += indent(depth + 1) + value.Serialize(depth + 1) + ",\r\n";
+                }
+                tmp = tmp.Substring(0, tmp.Length - 3) + "\r\n" + indent(depth) + "]";
+                return tmp;
+            }
+            return null;
+        }
+
+        override public string ToString()
         {
             string tmp = "";
 
@@ -388,19 +442,19 @@ namespace examples
                 return number.ToString();
 
             case JsonType.map:
-                tmp = "{\n";
+                tmp = "{";
                 foreach (KeyValuePair<string, JSON> pair in map) {
-                    tmp += indent(depth+1) + '"' + pair.Key + "\": " + pair.Value.Serialize(depth+1) + ",\n";
+                    tmp += '"' + pair.Key + "\":" + pair.Value.ToString() + ",";
                 }
-                tmp = tmp.Substring(0, tmp.Length-2) + "\n" + indent(depth) + "}";
+                tmp = tmp.Substring(0, tmp.Length - 1) + "}";
                 return tmp;
 
             case JsonType.array:
-                tmp = "[\n";
+                tmp = "[";
                 foreach (JSON value in array) {
-                    tmp += indent(depth+1) + value.Serialize(depth+1) + ",\n";
+                    tmp += value.ToString() + ",";
                 }
-                tmp = tmp.Substring(0, tmp.Length - 2) + "\n" + indent(depth) + "]";
+                tmp = tmp.Substring(0, tmp.Length - 1) + "]";
                 return tmp;
             }
             return null;
@@ -409,9 +463,8 @@ namespace examples
         private string indent(int depth)
         {
             string tmp = "";
-            for (int i=0; i<depth; i++) tmp += "    ";
+            for (int i = 0; i < depth; i++) tmp += "    ";
             return tmp;
         }
     }
-#endif // USE_JOSE
 }

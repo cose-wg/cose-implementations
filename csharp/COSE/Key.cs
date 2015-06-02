@@ -44,6 +44,10 @@ namespace COSE
             return new Org.BouncyCastle.Math.BigInteger(rgb2);
         }
 
+        public CBORObject this[CBORObject name]
+        {
+            get { return m_map[name]; }
+        }
 
         public byte[] AsBytes(string name)
         {

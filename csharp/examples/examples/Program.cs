@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.IO;
 
 using PeterO.Cbor;
+using JOSE;
 
 namespace examples
 {
@@ -13,18 +14,13 @@ namespace examples
 
     class Program
     {
-        enum Outputs { cbor=1, cborFlatten=2 };
+        enum Outputs { cbor = 1, cborDiag = 2, jose = 3, jose_compact = 4, jose_flatten = 5 };
 
-        static Outputs[] RgOutputs = new Outputs[] { Outputs.cbor, Outputs.cborFlatten };
+        static Outputs[] RgOutputs = new Outputs[] { Outputs.cborDiag  /*, Outputs.cbor, Outputs.cborFlatten*/ };
 
         static void Main(string[] args)
         {
-            RunTestsInDirectory("d:\\Projects\\COSE\\examples-contrib");
-#if false
-            SignExamples();
-            EncryptionExamples();
-            MacExamples();
-#endif // false
+            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\spec-examples");
         }
 
         static void RunTestsInDirectory(string strDirectory)
@@ -33,29 +29,33 @@ namespace examples
 
             diTop = new DirectoryInfo(strDirectory);
             foreach (var di in diTop.EnumerateDirectories()) {
-                RunTestsInDirectory(di.FullName);
+                if ((!di.Attributes.HasFlag(FileAttributes.Hidden)) &&
+                    (di.FullName.Substring(di.FullName.Length-4) != "\\new")) {
+                    RunTestsInDirectory(di.FullName);
+                }
             }
 
             foreach (var di in diTop.EnumerateFiles()) {
                 if (di.Extension == ".json") {
-                    ProcessFile(di.FullName);
+                    ProcessFile(di);
                 }
             }
         }
 
-        static void ProcessFile(string strFileName)
+        static void ProcessFile(FileInfo di)
         {
-            StreamReader file = File.OpenText(strFileName);
+            StreamReader file = File.OpenText(di.FullName);
             string fileText = file.ReadToEnd();
-            JSON control = new JSON(fileText);
+            JSON control = JSON.Parse(fileText);
             file.Close();
 
             try {
                 if (ProcessJSON(control)) {
                     fileText = control.Serialize();
-                    StreamWriter file2 = File.CreateText(strFileName + ".new");
+                    if (!Directory.Exists(di.DirectoryName + "\\new")) Directory.CreateDirectory(di.DirectoryName + "\\new");
+                    StreamWriter file2 = File.CreateText(di.DirectoryName + "\\new\\" + di.Name);
                     file2.Write(fileText);
-                    file2.Write("\n");
+                    file2.Write("\r\n");
                     file2.Close();
                 }
             }
@@ -77,16 +77,27 @@ namespace examples
             }
 
             if (control["input"].ContainsKey("rng_stream")) {
-                prng.AddSeedMaterial(FromHex(control["input"]["rng_stream"].AsString()));
+                if (control["input"]["rng_stream"].nodeType == JsonType.text) {
+                    prng.AddSeedMaterial(FromHex(control["input"]["rng_stream"].AsString()));
+                }
+                else if (control["input"]["rng_stream"].nodeType == JsonType.array) {
+                    foreach (var x in control["input"]["rng_stream"].array) {
+                        prng.AddSeedMaterial(FromHex(x.AsString()));
+                    }
+                }
             }
             COSE.Message.SetPRNG(prng);
+            JOSE.Message.SetPRNG(prng);
 
             foreach (Outputs output in RgOutputs) {
                 string outputName;
                 switch (output) {
                 case Outputs.cbor: outputName = "cbor"; break;
-                case Outputs.cborFlatten: outputName = "cbor_flat"; break;
-                default: outputName = ""; break;
+                case Outputs.cborDiag: outputName = "cbor_diag"; break;
+                case Outputs.jose: outputName = "json"; break;
+                case Outputs.jose_flatten: outputName = "json_flat"; break;
+                case Outputs.jose_compact: outputName = "compact"; break;
+                default: throw new Exception("unknown output type");
                 }
 
                 prng.Reset();
@@ -95,21 +106,70 @@ namespace examples
                     byte[] result;
 
                     if (control["input"].ContainsKey("mac")) result = ProcessMAC(output, control);
+                    else if (control["input"].ContainsKey("encrypt")) result = ProcessEncrypt(output, control);
+                    else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
                     else throw new Exception("Unknown operation in control");
 
                     if (control["output"].ContainsKey(outputName)) {
-                        byte[] rgbSource = FromHex(control["output"][outputName].AsString());
-                        if (rgbSource != result) {
-                            Console.WriteLine();
-                            Console.WriteLine("******************* New and Old do not match!!!");
-                            Console.WriteLine();
+                        if (output == Outputs.cbor) {
+ 
+                            byte[] rgbSource = FromHex(control["output"][outputName].AsString());
+                            if (!rgbSource.SequenceEqual(result)) {
+                                Console.WriteLine();
+                                Console.WriteLine("******************* New and Old do not match!!!");
+                                Console.WriteLine();
 
-                            control["output"][outputName].Set(ToHex(result));
-                            modified = true;
+
+                                control["output"][outputName].Set(ToHex(result));
+                                modified = true;
+                            }
+                        }
+                        else if (output == Outputs.cborDiag) {
+                            string strSource = control["output"][outputName].ToString();
+                            string strThis = UTF8Encoding.UTF8.GetString(result);
+
+                            if (strSource != strThis) {
+                                Console.WriteLine();
+                                Console.WriteLine("******************* New and Old do not match!!!");
+                                Console.WriteLine();
+
+                                control["output"][outputName].Set(strThis);
+                                modified = true;
+                            }
+                        }
+ 
+                        else {
+                            string strSource = control["output"][outputName].ToString();
+                            string strThis = UTF8Encoding.UTF8.GetString(result);
+
+                            if (strSource != strThis) {
+                                Console.WriteLine();
+                                Console.WriteLine("******************* New and Old do not match!!!");
+                                Console.WriteLine();
+
+
+                                if (output == Outputs.jose_compact) control["output"][outputName].Set(strThis);
+                                else control["output"][outputName].Set(JSON.Parse(strThis));
+                                modified = true;
+                            }
                         }
                     }
                     else {
-                        control["output"].Add(outputName, ToHex(result));
+                        switch (output) {
+                        case Outputs.cbor:
+                        case Outputs.jose_compact:
+                            control["output"].Add(outputName, ToHex(result));
+                            break;
+
+                        case Outputs.cborDiag:
+                            control["output"].Add(outputName, UTF8Encoding.UTF8.GetString(result));
+                            break;
+
+                        case Outputs.jose:
+                        case Outputs.jose_flatten:
+                            control["output"].Add(outputName, JSON.Parse(UTF8Encoding.UTF8.GetString(result)));
+                            break;
+                        }
                         modified = true;
                     }
 
@@ -122,377 +182,216 @@ namespace examples
                 catch (BadOutputException) {
                     if (control["output"].ContainsKey(outputName)) Console.WriteLine(String.Format("Output contains '{0}', but this format is not legal for the configuration", outputName));
                 }
+                catch (COSE.CoseException e) {
+                    Console.WriteLine(String.Format("COSE threw an error '{0}'.", e.ToString()));
+                }
+                catch (JOSE.JOSE_Exception e) {
+                    Console.WriteLine(String.Format("COSE threw an error '{0}'.", e.ToString()));
+                }
             }
 
             return modified;
         }
 
-
-
-        static void SignExamples()
+        static byte[] ProcessSign(Outputs outputFormat, JSON control)
         {
-            //  Signing Example #1 - ECDSA-256 - flattened
-
-            {
-                COSE.Key key = new COSE.Key();
-
-                key.Add("kty", "RSA");
-                key.Add("kid", "bilbo.baggins@hobbiton.example");
-                key.Add("use", "sig");
-                key.Add("n", base64urldecode("n4EPtAOCc9AlkeQHPzHStgAbgs7bTZLwUBZdR8_KuKPEHLd4rHVTeT-O-XV2jRojdNhxJWTDvNd7nqQ0VEiZQHz_AJmSCpMaJMRBSFKrKb2wqVwGU_NsYOYL-QtiWN2lbzcEe6XC0dApr5ydQLrHqkHHig3RBordaZ6Aj-oBHqFEHYpPe7Tpe-OfVfHd1E6cS6M1FZcD1NNLYD5lFHpPI9bTwJlsde3uhGqC0ZCuEHg8lhzwOHrtIQbS0FVbb9k3-tVTU4fg_3L_vniUFAKwuCLqKnS2BYwdq_mzSnbLY7h_qixoR7jig3__kRhuaxwUkRz5iaiQkqgc5gHdrNP5zw"));
-                key.Add("e", base64urldecode("AQAB"));
-                key.Add("d", base64urldecode("bWUC9B-EFRIo8kpGfh0ZuyGPvMNKvYWNtB_ikiH9k20eT-O1q_I78eiZkpXxXQ0UTEs2LsNRS-8uJbvQ-A1irkwMSMkK1J3XTGgdrhCku9gRldY7sNA_AKZGh-Q661_42rINLRCe8W-nZ34ui_qOfkLnK9QWDDqpaIsA-bMwWWSDFu2MUBYwkHTMEzLYGqOe04noqeq1hExBTHBOBdkMXiuFhUq1BU6l-DqEiWxqg82sXt2h-LMnT3046AOYJoRioz75tSUQfGCshWTBnP5uDjd18kKhyv07lhfSJdrPdM5Plyl21hsFf4L_mHCuoFau7gdsPfHPxxjVOcOpBrQzwQ"));
-                key.Add("p", base64urldecode("3Slxg_DwTXJcb6095RoXygQCAZ5RnAvZlno1yhHtnUex_fp7AZ_9nRaO7HX_-SFfGQeutao2TDjDAWU4Vupk8rw9JR0AzZ0N2fvuIAmr_WCsmGpeNqQnev1T7IyEsnh8UMt-n5CafhkikzhEsrmndH6LxOrvRJlsPp6Zv8bUq0k"));
-                key.Add("q", base64urldecode("uKE2dh-cTf6ERF4k4e_jy78GfPYUIaUyoSSJuBzp3Cubk3OCqs6grT8bR_cu0Dm1MZwWmtdqDyI95HrUeq3MP15vMMON8lHTeZu2lmKvwqW7anV5UzhM1iZ7z4yMkuUwFWoBvyY898EXvRD-hdqRxHlSqAZ192zB3pVFJ0s7pFc"));
-                key.Add("dp", base64urldecode("B8PVvXkvJrj2L-GYQ7v3y9r6Kw5g9SahXBwsWUzp19TVlgI-YV85q1NIb1rxQtD-IsXXR3-TanevuRPRt5OBOdiMGQp8pbt26gljYfKU_E9xn-RULHz0-ed9E9gXLKD4VGngpz-PfQ_q29pk5xWHoJp009Qf1HvChixRX59ehik"));
-                key.Add("dq", base64urldecode("CLDmDGduhylc9o7r84rEUVn7pzQ6PF83Y-iBZx5NT-TpnOZKF1pErAMVeKzFEl41DlHHqqBLSM0W1sOFbwTxYWZDm6sI6og5iTbwQGIC3gnJKbi_7k_vJgGHwHxgPaX2PnvP-zyEkDERuf-ry4c_Z11Cq9AqC2yeL6kdKT1cYF8"));
-                key.Add("qi", base64urldecode("3PiqvXQN0zwMeE-sBvZgi289XP9XCQF3VWqPzMKnIgQp7_Tugo6-NZBKCQsMf3HaEGBjTVJs_jcK8-TRXvaKe-7ZMaQj8VfBdYkssbu0NKDDhjJ-GtiseaDVWt7dcH0cfwxgFUHpQh7FoCrjFJ6h6ZEpMF6xmujs4qMpPz8aaI4"));
-
-                COSE.Key key2 = new COSE.Key();
-
-                key2.Add("kty", "EC");
-                key2.Add("kid", "bilbo.baggins@hobbiton.example");
-                key2.Add("use", "sig");
-                key2.Add("crv", "P-521");
-                key2.Add("x", base64urldecode("AHKZLLOsCOzz5cY97ewNUajB957y-C-U88c3v13nmGZx6sYl_oJXu9A5RkTKqjqvjyekWF-7ytDyRXYgCF5cj0Kt"));
-                key2.Add("y", base64urldecode("AdymlHvOiLxXkEhayXQnNCvDX4h9htZaCJN34kfmC6pV5OhQHiraVySsUdaQkAgDPrwQrJmbnX9cwlGfP-HqHZR1"));
-                key2.Add("d", base64urldecode("AAhRON2r9cqXX1hg-RoI6R1tX5p2rUAYdmpHZoC1XNM56KtscrX6zbKipQrCW9CGZH3T4ubpnoTKLDYJ_fF3_rJt"));
-
-
+            if (outputFormat < Outputs.jose) {
                 COSE.SignMessage msg = new COSE.SignMessage();
-                msg.SetContent("Content String");
 
-                COSE.Signer signer = new COSE.Signer(key);
-                msg.AddSigner(signer);
+                JSON input = control["input"];
+                JSON sign = input["sign"];
 
-                signer = new COSE.Signer(key2);
-                msg.AddSigner(signer);
+                msg.ForceArray(true);
 
-                byte[] rgb = msg.EncodeToBytes();
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
 
-                Console.WriteLine("Direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
+                if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], true);
+                if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], false);
 
-                byte[] rgb2 = msg.BEncodeToBytes();
-                Console.WriteLine("Borman Encodeing:");
-                Console.WriteLine("Line Length is " + rgb2.Length);
-                Console.WriteLine(BitConverter.ToString(rgb2).Replace('-', ' '));
-                string strT2 = BitConverter.ToString(rgb2).Replace('-', ' ');
-                Console.WriteLine();
+                if ((!sign.ContainsKey("signers")) || (sign["signers"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                foreach (JSON recip in sign["signers"].array) {
+                    msg.AddSigner(GetSigner(recip));
+                }
 
-#if false
-            COSE.PrettyPrint pp = new COSE.PrettyPrint();
-            String str = pp.PrintCBOR(rgb);
-            Console.WriteLine(str);
-#endif
+                if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
+                return msg.EncodeToBytes();
             }
+            else {
+                JOSE.SignMessage msg = new JOSE.SignMessage();
 
-            //  Signing Example #2 - PS512 - array
+                JSON input = control["input"];
+                JSON sign = input["sign"];
 
-            {
-                COSE.Key key = new COSE.Key();
+                if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
 
-                key.Add("kty", "RSA");
-                key.Add("kid", "bilbo.baggins@hobbiton.example");
-                key.Add("use", "sig");
-                key.Add("n", base64urldecode("n4EPtAOCc9AlkeQHPzHStgAbgs7bTZLwUBZdR8_KuKPEHLd4rHVTeT-O-XV2jRojdNhxJWTDvNd7nqQ0VEiZQHz_AJmSCpMaJMRBSFKrKb2wqVwGU_NsYOYL-QtiWN2lbzcEe6XC0dApr5ydQLrHqkHHig3RBordaZ6Aj-oBHqFEHYpPe7Tpe-OfVfHd1E6cS6M1FZcD1NNLYD5lFHpPI9bTwJlsde3uhGqC0ZCuEHg8lhzwOHrtIQbS0FVbb9k3-tVTU4fg_3L_vniUFAKwuCLqKnS2BYwdq_mzSnbLY7h_qixoR7jig3__kRhuaxwUkRz5iaiQkqgc5gHdrNP5zw"));
-                key.Add("e", base64urldecode("AQAB"));
-                key.Add("d", base64urldecode("bWUC9B-EFRIo8kpGfh0ZuyGPvMNKvYWNtB_ikiH9k20eT-O1q_I78eiZkpXxXQ0UTEs2LsNRS-8uJbvQ-A1irkwMSMkK1J3XTGgdrhCku9gRldY7sNA_AKZGh-Q661_42rINLRCe8W-nZ34ui_qOfkLnK9QWDDqpaIsA-bMwWWSDFu2MUBYwkHTMEzLYGqOe04noqeq1hExBTHBOBdkMXiuFhUq1BU6l-DqEiWxqg82sXt2h-LMnT3046AOYJoRioz75tSUQfGCshWTBnP5uDjd18kKhyv07lhfSJdrPdM5Plyl21hsFf4L_mHCuoFau7gdsPfHPxxjVOcOpBrQzwQ"));
-                key.Add("p", base64urldecode("3Slxg_DwTXJcb6095RoXygQCAZ5RnAvZlno1yhHtnUex_fp7AZ_9nRaO7HX_-SFfGQeutao2TDjDAWU4Vupk8rw9JR0AzZ0N2fvuIAmr_WCsmGpeNqQnev1T7IyEsnh8UMt-n5CafhkikzhEsrmndH6LxOrvRJlsPp6Zv8bUq0k"));
-                key.Add("q", base64urldecode("uKE2dh-cTf6ERF4k4e_jy78GfPYUIaUyoSSJuBzp3Cubk3OCqs6grT8bR_cu0Dm1MZwWmtdqDyI95HrUeq3MP15vMMON8lHTeZu2lmKvwqW7anV5UzhM1iZ7z4yMkuUwFWoBvyY898EXvRD-hdqRxHlSqAZ192zB3pVFJ0s7pFc"));
-                key.Add("dp", base64urldecode("B8PVvXkvJrj2L-GYQ7v3y9r6Kw5g9SahXBwsWUzp19TVlgI-YV85q1NIb1rxQtD-IsXXR3-TanevuRPRt5OBOdiMGQp8pbt26gljYfKU_E9xn-RULHz0-ed9E9gXLKD4VGngpz-PfQ_q29pk5xWHoJp009Qf1HvChixRX59ehik"));
-                key.Add("dq", base64urldecode("CLDmDGduhylc9o7r84rEUVn7pzQ6PF83Y-iBZx5NT-TpnOZKF1pErAMVeKzFEl41DlHHqqBLSM0W1sOFbwTxYWZDm6sI6og5iTbwQGIC3gnJKbi_7k_vJgGHwHxgPaX2PnvP-zyEkDERuf-ry4c_Z11Cq9AqC2yeL6kdKT1cYF8"));
-                key.Add("qi", base64urldecode("3PiqvXQN0zwMeE-sBvZgi289XP9XCQF3VWqPzMKnIgQp7_Tugo6-NZBKCQsMf3HaEGBjTVJs_jcK8-TRXvaKe-7ZMaQj8VfBdYkssbu0NKDDhjJ-GtiseaDVWt7dcH0cfwxgFUHpQh7FoCrjFJ6h6ZEpMF6xmujs4qMpPz8aaI4"));
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
 
-                COSE.Key key2 = new COSE.Key();
+                if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], true);
+                if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], false);
 
-                key2.Add("kty", "EC");
-                key2.Add("kid", "bilbo.baggins@hobbiton.example");
-                key2.Add("use", "sig");
-                key2.Add("crv", "P-521");
-                key2.Add("x", base64urldecode("AHKZLLOsCOzz5cY97ewNUajB957y-C-U88c3v13nmGZx6sYl_oJXu9A5RkTKqjqvjyekWF-7ytDyRXYgCF5cj0Kt"));
-                key2.Add("y", base64urldecode("AdymlHvOiLxXkEhayXQnNCvDX4h9htZaCJN34kfmC6pV5OhQHiraVySsUdaQkAgDPrwQrJmbnX9cwlGfP-HqHZR1"));
-                key2.Add("d", base64urldecode("AAhRON2r9cqXX1hg-RoI6R1tX5p2rUAYdmpHZoC1XNM56KtscrX6zbKipQrCW9CGZH3T4ubpnoTKLDYJ_fF3_rJt"));
+                if ((!sign.ContainsKey("signers")) || (sign["signers"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((sign["signers"].Count > 1) && (outputFormat == Outputs.jose_flatten)) throw new BadOutputException();
+                foreach (JSON recip in sign["signers"].array) {
+                    msg.AddSigner(GetSignerJOSE(recip));
+                }
 
-
-                COSE.SignMessage msg = new COSE.SignMessage();
-                msg.SetContent("Content String");
-
-                COSE.Signer signer = new COSE.Signer(key);
-                msg.AddSigner(signer);
-
-                signer = new COSE.Signer(key2);
-                msg.AddSigner(signer);
-
-                byte[] rgb = msg.EncodeToBytes();
-
-                Console.WriteLine("Direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
-
-                byte[] rgb2 = msg.BEncodeToBytes();
-                Console.WriteLine("Borman Encodeing:");
-                Console.WriteLine("Line Length is " + rgb2.Length);
-                Console.WriteLine(BitConverter.ToString(rgb2).Replace('-', ' '));
-                string strT2 = BitConverter.ToString(rgb2).Replace('-', ' ');
-                Console.WriteLine();
-
-#if false
-            COSE.PrettyPrint pp = new COSE.PrettyPrint();
-            String str = pp.PrintCBOR(rgb);
-            Console.WriteLine(str);
-#endif
+                if (outputFormat == Outputs.jose_compact) return UTF8Encoding.UTF8.GetBytes(msg.EncodeCompact());
+                return UTF8Encoding.UTF8.GetBytes(msg.Encode());
             }
-
-            //  Signing Example #3 - Multiple Signers
-            //      #1 - ES256
-            //      #2 - ES512
-            //      #3 - PS256
-
-            {
-                COSE.Key key = new COSE.Key();
-
-                key.Add("kty", "RSA");
-                key.Add("kid", "bilbo.baggins@hobbiton.example");
-                key.Add("use", "sig");
-                key.Add("n", base64urldecode("n4EPtAOCc9AlkeQHPzHStgAbgs7bTZLwUBZdR8_KuKPEHLd4rHVTeT-O-XV2jRojdNhxJWTDvNd7nqQ0VEiZQHz_AJmSCpMaJMRBSFKrKb2wqVwGU_NsYOYL-QtiWN2lbzcEe6XC0dApr5ydQLrHqkHHig3RBordaZ6Aj-oBHqFEHYpPe7Tpe-OfVfHd1E6cS6M1FZcD1NNLYD5lFHpPI9bTwJlsde3uhGqC0ZCuEHg8lhzwOHrtIQbS0FVbb9k3-tVTU4fg_3L_vniUFAKwuCLqKnS2BYwdq_mzSnbLY7h_qixoR7jig3__kRhuaxwUkRz5iaiQkqgc5gHdrNP5zw"));
-                key.Add("e", base64urldecode("AQAB"));
-                key.Add("d", base64urldecode("bWUC9B-EFRIo8kpGfh0ZuyGPvMNKvYWNtB_ikiH9k20eT-O1q_I78eiZkpXxXQ0UTEs2LsNRS-8uJbvQ-A1irkwMSMkK1J3XTGgdrhCku9gRldY7sNA_AKZGh-Q661_42rINLRCe8W-nZ34ui_qOfkLnK9QWDDqpaIsA-bMwWWSDFu2MUBYwkHTMEzLYGqOe04noqeq1hExBTHBOBdkMXiuFhUq1BU6l-DqEiWxqg82sXt2h-LMnT3046AOYJoRioz75tSUQfGCshWTBnP5uDjd18kKhyv07lhfSJdrPdM5Plyl21hsFf4L_mHCuoFau7gdsPfHPxxjVOcOpBrQzwQ"));
-                key.Add("p", base64urldecode("3Slxg_DwTXJcb6095RoXygQCAZ5RnAvZlno1yhHtnUex_fp7AZ_9nRaO7HX_-SFfGQeutao2TDjDAWU4Vupk8rw9JR0AzZ0N2fvuIAmr_WCsmGpeNqQnev1T7IyEsnh8UMt-n5CafhkikzhEsrmndH6LxOrvRJlsPp6Zv8bUq0k"));
-                key.Add("q", base64urldecode("uKE2dh-cTf6ERF4k4e_jy78GfPYUIaUyoSSJuBzp3Cubk3OCqs6grT8bR_cu0Dm1MZwWmtdqDyI95HrUeq3MP15vMMON8lHTeZu2lmKvwqW7anV5UzhM1iZ7z4yMkuUwFWoBvyY898EXvRD-hdqRxHlSqAZ192zB3pVFJ0s7pFc"));
-                key.Add("dp", base64urldecode("B8PVvXkvJrj2L-GYQ7v3y9r6Kw5g9SahXBwsWUzp19TVlgI-YV85q1NIb1rxQtD-IsXXR3-TanevuRPRt5OBOdiMGQp8pbt26gljYfKU_E9xn-RULHz0-ed9E9gXLKD4VGngpz-PfQ_q29pk5xWHoJp009Qf1HvChixRX59ehik"));
-                key.Add("dq", base64urldecode("CLDmDGduhylc9o7r84rEUVn7pzQ6PF83Y-iBZx5NT-TpnOZKF1pErAMVeKzFEl41DlHHqqBLSM0W1sOFbwTxYWZDm6sI6og5iTbwQGIC3gnJKbi_7k_vJgGHwHxgPaX2PnvP-zyEkDERuf-ry4c_Z11Cq9AqC2yeL6kdKT1cYF8"));
-                key.Add("qi", base64urldecode("3PiqvXQN0zwMeE-sBvZgi289XP9XCQF3VWqPzMKnIgQp7_Tugo6-NZBKCQsMf3HaEGBjTVJs_jcK8-TRXvaKe-7ZMaQj8VfBdYkssbu0NKDDhjJ-GtiseaDVWt7dcH0cfwxgFUHpQh7FoCrjFJ6h6ZEpMF6xmujs4qMpPz8aaI4"));
-
-                COSE.Key key2 = new COSE.Key();
-
-                key2.Add("kty", "EC");
-                key2.Add("kid", "bilbo.baggins@hobbiton.example");
-                key2.Add("use", "sig");
-                key2.Add("crv", "P-521");
-                key2.Add("x", base64urldecode("AHKZLLOsCOzz5cY97ewNUajB957y-C-U88c3v13nmGZx6sYl_oJXu9A5RkTKqjqvjyekWF-7ytDyRXYgCF5cj0Kt"));
-                key2.Add("y", base64urldecode("AdymlHvOiLxXkEhayXQnNCvDX4h9htZaCJN34kfmC6pV5OhQHiraVySsUdaQkAgDPrwQrJmbnX9cwlGfP-HqHZR1"));
-                key2.Add("d", base64urldecode("AAhRON2r9cqXX1hg-RoI6R1tX5p2rUAYdmpHZoC1XNM56KtscrX6zbKipQrCW9CGZH3T4ubpnoTKLDYJ_fF3_rJt"));
-
-
-                COSE.SignMessage msg = new COSE.SignMessage();
-                msg.SetContent("Content String");
-
-                COSE.Signer signer = new COSE.Signer(key);
-                msg.AddSigner(signer);
-
-                signer = new COSE.Signer(key2);
-                msg.AddSigner(signer);
-
-                byte[] rgb = msg.EncodeToBytes();
-
-                Console.WriteLine("Direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
-
-                byte[] rgb2 = msg.BEncodeToBytes();
-                Console.WriteLine("Borman Encodeing:");
-                Console.WriteLine("Line Length is " + rgb2.Length);
-                Console.WriteLine(BitConverter.ToString(rgb2).Replace('-', ' '));
-                string strT2 = BitConverter.ToString(rgb2).Replace('-', ' ');
-                Console.WriteLine();
-
-#if false
-            COSE.PrettyPrint pp = new COSE.PrettyPrint();
-            String str = pp.PrintCBOR(rgb);
-            Console.WriteLine(str);
-#endif
-            }
-
         }
 
-        static void EncryptionExamples()
+        static byte[] ProcessEncrypt(Outputs outputFormat, JSON control)
         {
-#if false
-            Encrypt - no array
-     CE: AES-CCM-64
-     KM: AES-KW
-Encrypt - one element array
-     CE: AES-GCM
-     KM: RSA-OAEP
-Encrypt - multiple recipient
-     CE: AES-GCM
-     KM: RSA-OAEP
-     KM: ECDH + AES KW
-     KM: AES-GCM-KW
-Encrypt - three layer - flat
-     CE: AES-GCM
-     KM: AES-KW
-     KM(layer 2): ECHD - SS - Direct
-#endif
+            JSON input = control["input"];
+            JSON encrypt = input["encrypt"];
 
-            //  Direct encryption example
-            if (true) {
+            if (outputFormat < Outputs.jose) {
                 COSE.EncryptMessage msg = new COSE.EncryptMessage();
 
-                msg.SetContent("Content String");
+                msg.ForceArray(true);
 
-                COSE.Key key = new COSE.Key();
-                key.Add("kty", "oct");
-                key.Add("kid", "77c7e2b8-6e13-45cf-8672-617b5b45243a");
-                key.Add("use", "enc");
-                key.Add("alg", "A128GCM");
-                key.Add("k", base64urldecode("XctOhJAkA-pD9Lh7ZgW_2A"));
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
 
+                if (encrypt.ContainsKey("protected")) AddAttributes(msg, encrypt["protected"], true);
+                if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], false);
 
-                COSE.Recipient recipient = new COSE.Recipient(key, "dir");
-                msg.AddRecipient(recipient);
+                if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
 
-                byte[] rgb = msg.EncodeToBytes();
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                foreach (JSON recip in encrypt["recipients"].array) {
+                    msg.AddRecipient(GetRecipient(recip));
+                }
 
-                Console.WriteLine("Direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
-
-                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
-
-                msg2.Decrypt(key);
+                if (outputFormat == Outputs.cborDiag)     return UTF8Encoding.UTF8.GetBytes( msg.EncodeToCBORObject().ToString());
+                return msg.EncodeToBytes();
             }
+            else {
+                JOSE.EncryptMessage msg = new JOSE.EncryptMessage();
 
-            //  Key wrap example
-            if (true) {
-                COSE.EncryptMessage msg = new COSE.EncryptMessage();
+                if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
 
-                msg.SetContent("Content String");
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
 
-                COSE.Key key = new COSE.Key();
-                key.Add("kty", "oct");
-                key.Add("kid", "77c7e2b8-6e13-45cf-8672-617b5b45243a");
-                key.Add("use", "enc");
-                key.Add("alg", "A128GCM");
-                key.Add("k", base64urldecode("XctOhJAkA-pD9Lh7ZgW_2A"));
+                if (encrypt.ContainsKey("aad")) msg.SetAAD(encrypt["aad"].AsString());
 
+                if (encrypt.ContainsKey("protected_jose")) AddAttributes(msg, encrypt["protected_jose"], true);
+                if (encrypt.ContainsKey("unprotected_jose")) AddAttributes(msg, encrypt["unprotected_jose"], false);
 
-                COSE.Recipient recipient = new COSE.Recipient(key);
-                msg.AddRecipient(recipient);
+                if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
 
-                byte[] rgb = msg.EncodeToBytes();
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((encrypt["recipients"].Count > 1) && (outputFormat != Outputs.jose)) throw new BadOutputException();
 
-                Console.WriteLine("Key Wrap Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
+                foreach (JSON recip in encrypt["recipients"].array) {
+                    msg.AddRecipient(GetRecipientJOSE(recip));
+                }
 
-                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
-
-                msg2.Decrypt(key);
-            }
-
-            // ECDH Example - Direct
-            if (true) {
-                COSE.Key key = new COSE.Key();
-
-                key.Add("kty", "EC");
-                key.Add("kid", "meriadoc.brandybuck@buckland.example");
-                key.Add("use", "enc");
-                key.Add("crv", "P-256");
-                key.Add("x", base64urldecode("Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0"));
-                key.Add("y", base64urldecode("HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw"));
-                key.Add("d", base64urldecode("r_kHyZ-a06rmxM3yESK84r1otSg-aQcVStkRhA-iCM8"));
-
-                COSE.EncryptMessage msg = new COSE.EncryptMessage();
-
-                msg.SetContent("Content String");
-
-                COSE.Recipient recipient = new COSE.Recipient(key, "ECDH-ES");
-                msg.AddRecipient(recipient);
-
-                byte[] rgb = msg.EncodeToBytes();
-
-                Console.WriteLine("ECDH direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
-
-                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
-
-                msg2.Decrypt(key);
-            }
-
-            // ECDH + keywrap example
-            if (true) {
-                COSE.Key key = new COSE.Key();
-
-                key.Add("kty", "EC");
-                key.Add("kid", "meriadoc.brandybuck@buckland.example");
-                key.Add("use", "enc");
-                key.Add("crv", "P-256");
-                key.Add("x", base64urldecode("Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0"));
-                key.Add("y", base64urldecode("HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw"));
-                key.Add("d", base64urldecode("r_kHyZ-a06rmxM3yESK84r1otSg-aQcVStkRhA-iCM8"));
-
-                COSE.EncryptMessage msg = new COSE.EncryptMessage();
-
-                msg.SetContent("Content String");
-
-                COSE.Recipient recipient = new COSE.Recipient(key);
-                msg.AddRecipient(recipient);
-
-                byte[] rgb = msg.EncodeToBytes();
-
-                Console.WriteLine("ECDH direct Encoding Example:");
-                Console.WriteLine("Line Length is " + rgb.Length);
-                Console.WriteLine(BitConverter.ToString(rgb).Replace('-', ' '));
-                string strT = BitConverter.ToString(rgb).Replace('-', ' ');
-                Console.WriteLine();
-
-                COSE.EncryptMessage msg2 = (COSE.EncryptMessage) COSE.Message.DecodeFromBytes(rgb);
-
-                msg2.Decrypt(key);
+                if (outputFormat == Outputs.jose_compact) return UTF8Encoding.UTF8.GetBytes(msg.EncodeCompact());
+                return UTF8Encoding.UTF8.GetBytes( msg.Encode());
 
             }
         }
 
         static byte[] ProcessMAC(Outputs outputFormat, JSON control)
         {
-            COSE.MACMessage msg = new COSE.MACMessage();
+            if (outputFormat < Outputs.jose) {
+                COSE.MACMessage msg = new COSE.MACMessage();
 
-            if (outputFormat != Outputs.cborFlatten) msg.ForceArray(true);
+                msg.ForceArray(true);
 
-            JSON input = control["input"];
+                JSON input = control["input"];
 
-            if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
-            msg.SetContent(input["plaintext"].AsString());
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
 
-            JSON mac = input["mac"];
+                JSON mac = input["mac"];
 
-            if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], true);
-            if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], false);
+                if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], true);
+                if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], false);
 
-            if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
-            //  Should check that this exists somewhere and has the correct value
+                if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
 
-            if ((!mac.ContainsKey("recipients")) || (mac["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
-            foreach (JSON recip in mac["recipients"].array) {
-                msg.AddRecipient(GetRecipient(recip));
+                if ((!mac.ContainsKey("recipients")) || (mac["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((mac["recipients"].Count > 1) && (outputFormat == Outputs.jose_flatten)) throw new BadOutputException();
+
+                foreach (JSON recip in mac["recipients"].array) {
+                    msg.AddRecipient(GetRecipient(recip));
+                }
+
+                if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
+                return msg.EncodeToBytes();
             }
+            else {
+                JOSE.SignMessage msg = new JOSE.SignMessage();
 
-            return msg.EncodeToBytes();
+                JSON input = control["input"];
+                JSON sign = input["mac"];
+
+                if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
+
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
+
+                if (sign.ContainsKey("protected_jose")) AddAttributes(msg, sign["protected_jose"], true);
+                if (sign.ContainsKey("unprotected_jose")) AddAttributes(msg, sign["unprotected_jose"], false);
+
+                if (!sign.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
+
+                if ((!sign.ContainsKey("recipients")) || (sign["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                foreach (JSON recip in sign["recipients"].array) {
+                    msg.AddSigner(GetSignerJOSE(recip));
+                }
+
+                if (outputFormat == Outputs.jose_compact) return UTF8Encoding.UTF8.GetBytes(msg.EncodeCompact());
+                return UTF8Encoding.UTF8.GetBytes(msg.Encode());
+            }
         }
 
-        static void AddAttributes(COSE.Message msg, JSON items, bool fProtected)
+        static void AddAttributes(COSE.Attributes msg, JSON items, bool fProtected)
+        {
+            foreach (KeyValuePair<string, JSON> attr in items.map) {
+                CBORObject cborKey;
+                CBORObject cborValue;
+
+                if ((attr.Key.Length > 4) && (attr.Key.Substring(attr.Key.Length - 4, 4) == "_hex")) {
+                    cborKey = CBORObject.FromObject(attr.Key.Substring(0, attr.Key.Length - 4));
+                    cborValue = CBORObject.FromObject( FromHex(attr.Value.AsString()));
+                }
+                else cborValue = AsCbor(attr.Value);
+
+                switch (attr.Key) {
+                case "alg":
+                    cborKey = COSE.HeaderKeys.Algorithm;
+                    cborValue = AlgorithmMap(cborValue);
+                    break;
+
+                case "kid":
+                    cborKey = COSE.HeaderKeys.KeyId;
+                    break;
+
+                default:
+                    cborKey = CBORObject.FromObject(attr.Key);
+                    break;
+                }
+                msg.AddAttribute(cborKey, cborValue, fProtected);
+            }
+        }
+
+        static void AddAttributes(JOSE.Attributes msg, JSON items, bool fProtected)
         {
             foreach (KeyValuePair<string, JSON> key in items.map) {
                 if ((key.Key.Length > 4) && (key.Key.Substring(key.Key.Length - 4, 4) == "_hex")) {
-                    msg.AddAttribute(key.Key.Substring(0, key.Key.Length - 4), CBORObject.FromObject(FromHex(key.Value.AsString())), fProtected);
+                    msg.AddAttribute(key.Key.Substring(0, key.Key.Length - 4), JOSE.Message.base64urlencode(FromHex(key.Value.AsString())), fProtected);
                 }
-                else msg.AddAttribute(key.Key, key.Value.AsCbor(), fProtected);
+                else msg.AddAttribute(key.Key, key.Value, fProtected);
             }
         }
 
@@ -502,7 +401,8 @@ Encrypt - three layer - flat
 
             COSE.Key key = GetKey(control["key"]);
 
-            COSE.Recipient recipient = new COSE.Recipient(key, control["alg"].AsString());
+            CBORObject alg = AlgorithmMap(CBORObject.FromObject(control["alg"].AsString()));
+            COSE.Recipient recipient = new COSE.Recipient(key, alg);
 
             //  Double check that alg is the same as in the attributes
 
@@ -514,6 +414,103 @@ Encrypt - three layer - flat
                 recipient.SetSenderKey(myKey);
             }
             return recipient;
+        }
+
+        static JOSE.Recipient GetRecipientJOSE(JSON control)
+        {
+            JOSE.Key key;
+
+            if (!control.ContainsKey("alg")) throw new Exception("Recipient missing alg field");
+
+            if (control.ContainsKey("key")) {
+                key = new JOSE.Key(control["key"]);
+            }
+            else if (control.ContainsKey("pwd")) {
+                key = new JOSE.Key();
+                key.Add("kty", "oct");
+                key.Add("k", JOSE.Message.base64urlencode(UTF8Encoding.UTF8.GetBytes(  control["pwd"].AsString())));
+            }
+            else throw new Exception("No key defined for a recipient");
+
+            JOSE.Recipient recipient = new JOSE.Recipient(key, control["alg"].AsString());
+
+            //  Double check that alg is the same as in the attributes
+
+            recipient.ClearProtected();
+            recipient.ClearUnprotected();
+
+            if (control.ContainsKey("protected_jose")) AddAttributes(recipient, control["protected_jose"], true);
+            if (control.ContainsKey("unprotected_jose")) AddAttributes(recipient, control["unprotected_jose"], false);
+
+            if (control.ContainsKey("sender_key")) {
+                JOSE.Key myKey = new JOSE.Key(control["sender_key"]);
+                recipient.SetSenderKey(myKey);
+            }
+            return recipient;
+        }
+
+        static COSE.Signer GetSigner(JSON control)
+        {
+            if (!control.ContainsKey("alg")) throw new Exception("Signer missing alg field");
+
+            COSE.Key key = GetKey(control["key"]);
+
+            COSE.Signer signer = new COSE.Signer(key, control["alg"].AsString());
+
+            if (control.ContainsKey("protected")) AddAttributes(signer, control["protected"], true);
+            if (control.ContainsKey("unprotected")) AddAttributes(signer, control["unprotected"], false);
+
+            return signer;
+        }
+
+        static JOSE.Signer GetSignerJOSE(JSON control)
+        {
+            if (!control.ContainsKey("alg")) throw new Exception("Signer missing alg field");
+
+            JOSE.Key key = new JOSE.Key(control["key"]);
+
+            JOSE.Signer signer = new JOSE.Signer(key, control["alg"].AsString());
+
+            if (control.ContainsKey("protected_jose")) AddAttributes(signer, control["protected_jose"], true);
+            if (control.ContainsKey("unprotected_jose")) AddAttributes(signer, control["unprotected_jose"], false);
+
+            return signer;
+        }
+
+        static COSE.Key GetKey(JSON control)
+        {
+            COSE.Key key = new COSE.Key();
+
+            foreach (KeyValuePair<string, JSON> pair in control.map) {
+                switch (pair.Key) {
+                case "kty":
+                case "kid":
+                case "use":
+                case "enc":
+                case "crv":
+                case "alg":
+                    key.Add(pair.Key, pair.Value.AsString());
+                    break;
+
+                case "x":
+                case "y":
+                case "d":
+                case "k":
+                case "e":
+                case "n":
+                case "p":
+                case "q":
+                case "dp":
+                case "dq":
+                case "qi":
+                    key.Add(pair.Key, base64urldecode(pair.Value.AsString()));
+                    break;
+
+                default:
+                    throw new Exception("Unrecognized field name " + pair.Key + " in key object");
+                }
+            }
+            return key;
         }
 
         static COSE.Key GetKey(JSON control)
@@ -581,6 +578,59 @@ Encrypt - three layer - flat
             for (int i = 0; i < NumberChars; i += 2)
                 bytes[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
             return bytes;
+        }
+
+        public static CBORObject AsCbor(JSON json)
+        {
+            CBORObject obj;
+
+            switch (json.nodeType) {
+            case JsonType.array:
+                obj = CBORObject.NewArray();
+                foreach (JSON pair in json.array) {
+                    obj.Add(AsCbor(pair));
+                }
+                return obj;
+
+            case JsonType.map:
+                obj = CBORObject.NewMap();
+                foreach (KeyValuePair<string, JSON> pair in json.map) {
+                    obj.Add(pair.Key, AsCbor(pair.Value));
+                }
+                return obj;
+
+            case JsonType.number:
+                return CBORObject.FromObject(json.number);
+
+            case JsonType.text:
+                return CBORObject.FromObject(json.text);
+
+            case JsonType.unknown:
+            default:
+                throw new Exception("Can deal with unknown JSON node type");
+            }
+
+
+        }
+
+        static CBORObject AlgorithmMap(CBORObject old)
+        {
+            switch (old.AsString()) {
+            case "A128GCM": return COSE.AlgorithmValues.AES_GCM_128;
+            case "A192GCM": return COSE.AlgorithmValues.AES_GCM_192;
+            case "A256GCM": return COSE.AlgorithmValues.AES_GCM_256;
+            case "A128KW": return COSE.AlgorithmValues.AES_KW_128;
+            case "A192KW": return COSE.AlgorithmValues.AES_KW_192;
+            case "A256KW": return COSE.AlgorithmValues.AES_KW_256;
+            case "RSA-OAEP": return COSE.AlgorithmValues.RSA_OAEP;
+            case "RSA-OAEP-256": return COSE.AlgorithmValues.RSA_OAEP_256;
+            case "HS256": return COSE.AlgorithmValues.HMAC_SHA_256;
+            case "HS512": return COSE.AlgorithmValues.HMAC_SHA_512;
+            case "ES256": return COSE.AlgorithmValues.ECDSA_256;
+            case "ES512": return COSE.AlgorithmValues.ECDSA_512;
+                
+            default: return old;
+            }
         }
     }
 

@@ -23,6 +23,8 @@ using Org.BouncyCastle.Math.EC;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities.Encoders;
 
+using System.Diagnostics;
+
 namespace COSE
 {
     public class EncryptMessage : Message
@@ -41,29 +43,30 @@ namespace COSE
 
         public void DecodeFromCBORObject(CBORObject obj, int index, int size)
         {
-            if (size < 5) throw new Exception("Invalid Encryption structure");
+#if USE_ARRAY
+            if (size < 5) throw new CoseException("Invalid Encryption structure");
 
             //  Protected values.
             if (obj[index + 0].Type == CBORType.ByteString) {
                 objProtected = CBORObject.DecodeFromBytes(obj[index + 0].GetByteString());
-                if (objProtected.Type != CBORType.Map) throw new Exception("Invalid Encryption Structure");
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
             }
             else if (obj[index + 0].IsNull) {
                 objProtected = CBORObject.NewMap();
             }
             else {
-                throw new Exception("Invalid Encryption structure");
+                throw new CoseException("Invalid Encryption structure");
             }
 
             //  Unprotected attributes
             if (obj[index + 1].Type == PeterO.Cbor.CBORType.Map) objUnprotected = obj[index + 1];
             else if (obj[index + 1].IsNull) objUnprotected = PeterO.Cbor.CBORObject.NewMap();
-            else throw new Exception("Invalid Encryption Structure");
+            else throw new CoseException("Invalid Encryption Structure");
 
             //  IV
             if (obj[index + 2].Type == CBORType.ByteString) IV = obj[index + 2].GetByteString();
             else if (obj[index + 2].IsNull) ;
-            else throw new Exception("Invalid Exception Structure");
+            else throw new CoseException("Invalid Exception Structure");
 
             // Cipher Text
             if (obj[index + 3].Type == CBORType.ByteString) rgbEncrypted = obj[index + 3].GetByteString();
@@ -85,27 +88,96 @@ namespace COSE
                 recip.DecodeFromCBORObject(obj, index + 4, size - 4);
                 recipientList.Add(recip);
             }
+#else
+            CBORObject tmp;
+
+            //  Protected values.
+            tmp = obj[RecordKeys.Protected];
+            if (tmp != null) {
+                if (tmp.Type == CBORType.ByteString) {
+                    objProtected = CBORObject.DecodeFromBytes(tmp.GetByteString());
+                    if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
+                }
+                else {
+                    throw new CoseException("Invalid Encryption structure");
+                }
+            }
+
+            //  Unprotected attributes
+            tmp = obj[RecordKeys.Unprotected];
+            if (tmp != null) {
+                if (tmp.Type == PeterO.Cbor.CBORType.Map) objUnprotected = tmp;
+                else throw new CoseException("Invalid Encryption Structure");
+            }
+
+            //  IV
+            tmp = obj[RecordKeys.IV];
+            if (tmp != null) {
+                if (tmp.Type == CBORType.ByteString) IV = tmp.GetByteString();
+                else throw new CoseException("Invalid Exception Structure");
+            }
+
+            // Cipher Text
+            tmp = obj[RecordKeys.CipherText];
+            if (tmp != null) {
+                if (obj[index + 3].Type == CBORType.ByteString) rgbEncrypted = tmp.GetByteString();
+            }
+
+            // Recipients
+            tmp = obj[RecordKeys.Recipients];
+            if (tmp != null) {
+                if (tmp.Type == CBORType.Array) {
+                    // An array of recipients to be processed
+                    for (int i = 0; i < tmp.Count; i++) {
+                        Recipient recip = new Recipient();
+                        recip.DecodeFromCBORObject(tmp[i], 0, tmp[i].Count);
+                        recipientList.Add(recip);
+                    }
+                }
+                else throw new CoseException("Invalid Encryption Structure"); 
+            }
+#endif
         }
 
         override public byte[] EncodeToBytes()
         {
-            CBORObject obj3;
+            CBORObject obj;
 
-            obj = CBORObject.NewArray();
-            obj.Add(2);  // Tag as an encrypt item
-
-            obj3 = EncodeToCBORObject();
-
-            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
+            obj = EncodeToCBORObject();
 
             return obj.EncodeToBytes();
         }
 
         public CBORObject EncodeToCBORObject()
         {
-            CBORObject obj = CBORObject.NewArray();
+            CBORObject obj3;
 
+#if USE_ARRAY
+            obj = CBORObject.NewArray();
+            obj.Add(2);  // Tag as an encrypt item
+#else
+            obj = CBORObject.NewMap();
+            obj.Add(RecordKeys.MsgType, 2);
+#endif
+
+            obj3 = Encode();
+
+#if USE_ARRAY
+            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
+#else
+            foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
+#endif
+            return obj;
+        }
+
+        public virtual CBORObject Encode()
+        {
+            CBORObject obj;
+            
             if (rgbEncrypted == null) Encrypt();
+
+#if USE_ARRAY
+            obj = CBORObject.NewArray();
 
             if (objProtected.Count > 0) {
                 obj.Add(objProtected.EncodeToBytes());
@@ -116,25 +188,39 @@ namespace COSE
 
             obj.Add(IV);      // Add iv
             obj.Add(rgbEncrypted);      // Add ciphertext
+#else
+            obj = CBORObject.NewMap();
 
-            if (recipientList.Count == 1) {
-                CBORObject recipient = recipientList[0].EncodeToCBORObject();
+            if (objProtected.Count > 0) obj.Add(RecordKeys.Protected, objProtected.EncodeToBytes());
+            if (objUnprotected.Count > 0) obj.Add(RecordKeys.Unprotected, objUnprotected);
+            if ((IV != null) && (IV.Length > 0)) obj.Add(RecordKeys.IV, IV);
+            if ((rgbEncrypted != null) && (rgbEncrypted.Length > 0)) obj.Add(RecordKeys.CipherText, rgbEncrypted);
+#endif
+
+            if ((recipientList.Count == 1) && !m_forceArray) {
+                CBORObject recipient = recipientList[0].Encode();
 
                 for (int i = 0; i < recipient.Count; i++) {
                     obj.Add(recipient[i]);
                 }
             }
-            else if (recipientList.Count > 1) {
+            else if (recipientList.Count > 0) {
                 CBORObject recipients = CBORObject.NewArray();
 
                 foreach (Recipient key in recipientList) {
-                    recipients.Add(key.EncodeToCBORObject());
+                    recipients.Add(key.Encode());
                 }
+#if USE_ARRAY
                 obj.Add(recipients);
+#else
+                obj.Add(RecordKeys.Recipients, recipients);
+#endif
             }
+#if USE_ARRAY
             else {
                 obj.Add(null);      // No recipients - set to null
             }
+#endif
             return obj;
         }
 
@@ -144,57 +230,69 @@ namespace COSE
             byte[] CEK = null;
             int cbitCEK = 0;
 
-            string alg = FindAttribute("alg").AsString();
+            CBORObject alg = FindAttribute(HeaderKeys.Algorithm);
 
-            switch (alg) {
-            case "A128GCM":
-                cbitCEK = 128;
-                break;
-
-            case "A192GCM":
-                cbitCEK = 192;
-                break;
-
-            case "A256GCM":
-                cbitCEK = 256;
-                break;
-
-            default:
-                throw new Exception("Unknown or unimplemented algorithm");
+            if (alg.Type == CBORType.TextString) {
+                throw new CoseException("Algorithm not supported: " + alg.AsString());
             }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
+                    cbitCEK = 128;
+                    break;
+
+                case AlgorithmValuesInt.AES_GCM_192:
+                    cbitCEK = 192;
+                    break;
+
+                case AlgorithmValuesInt.AES_GCM_256:
+                    cbitCEK = 256;
+                    break;
+
+                default:
+                    throw new CoseException("Unknown or unimplemented algorithm");
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
 
             foreach (Recipient recipient in recipientList) {
                 try {
                     CEK = recipient.Decrypt(key, cbitCEK, alg);
                 }
-                catch (Exception) { }
+                catch (CoseException) { }
             }
             if (CEK == null) {
                 //  Generate a random CEK
             }
 
-            switch (alg) {
-            case "A128GCM":
-            case "A192GCM":
-            case "A256GCM":
-                AES_Decrypt(alg, CEK);
-                break;
+            if (alg.Type == CBORType.TextString) {
+                throw new CoseException("Algorithm not supported " + alg.AsString());
             }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
+                case AlgorithmValuesInt.AES_GCM_192:
+                case AlgorithmValuesInt.AES_GCM_256:
+                    AES_Decrypt(alg, CEK);
+                    break;
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
 
         }
 
-        public virtual void Encrypt()
+        virtual public void Encrypt()
         {
-            string alg;
+            CBORObject alg;
 
             //  Get the algorithm we are using - the default is AES GCM
 
             try {
-                alg = FindAttribute("alg").AsString();
+                alg = FindAttribute(HeaderKeys.Algorithm);
             }
             catch {
-                alg = "A128GCM";
-                AddUnprotected("alg", "A128GCM");
+                alg = AlgorithmValues.AES_GCM_128;
+                AddUnprotected(HeaderKeys.Algorithm, alg);
             }
 
             byte[] ContentKey = null;
@@ -206,7 +304,7 @@ namespace COSE
                 switch (key.recipientType) {
                 case RecipientType.direct:
                 case RecipientType.keyAgreeDirect:
-                    if ((recipientTypes & 1) != 0) throw new Exception("It is not legal to have two direct recipients in a message");
+                    if ((recipientTypes & 1) != 0) throw new CoseException("It is not legal to have two direct recipients in a message");
                     recipientTypes |= 1;
                     ContentKey = key.GetKey(alg);
                     break;
@@ -217,22 +315,34 @@ namespace COSE
                 }
             }
 
-            if (recipientTypes == 3) throw new Exception("It is not legal to mix direct and indirect recipients in a message");
+            if (recipientTypes == 3) throw new CoseException("It is not legal to mix direct and indirect recipients in a message");
 
-            switch (alg) {
-            case "A128GCM":
-            case "A192GCM":
-            case "A256GCM":
-                ContentKey = AES(alg, ContentKey);
-                break;
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-128-CCM-64":
+                    ContentKey = AES_CCM(alg, ContentKey);
+                    break;
 
-            case "A128CBC-HS256":
-            case "A192CBC-HS256":
-            case "A256CBC-HS256":
-                throw new Exception("Content encrption algorithm is not supported");
+                case "A128CBC-HS256":
+                case "A192CBC-HS256":
+                case "A256CBC-HS256":
+                    throw new CoseException("Content encryption algorithm is not supported");
 
-            default:
-                throw new Exception("Content encryption algorithm is not recognized");
+                default:
+                    throw new CoseException("Content encryption algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
+                case AlgorithmValuesInt.AES_GCM_192:
+                case AlgorithmValuesInt.AES_GCM_256:
+                    ContentKey = AES(alg, ContentKey);
+                    break;
+
+                default:
+                    throw new CoseException("Content encryption algorithm is not recognized");
+                }
             }
 
  
@@ -264,11 +374,9 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
-        private byte[] AES(string alg, byte[] K)
+        private byte[] AES(CBORObject alg, byte[] K)
         {
             GcmBlockCipher cipher = new GcmBlockCipher(new AesFastEngine(), new BasicGcmMultiplier());
-            SecureRandom srng = new SecureRandom();
-
             KeyParameter ContentKey;
 
             //  The requirements from JWA
@@ -277,26 +385,26 @@ namespace COSE
             //  key sizes are 128, 192 and 256 bits
 
             IV = new byte[96/8];
-            srng.NextBytes(IV);
+            s_PRNG.NextBytes(IV);
 
             if (K == null) {
-                switch (alg) {
-                case "A128GCM":
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
                     K = new byte[128 / 8];
                     break;
 
-                case "A196GCM":
+                case AlgorithmValuesInt.AES_GCM_192:
                     K = new byte[196 / 8];
                     break;
 
-                case "A256GCM":
+                case AlgorithmValuesInt.AES_GCM_256:
                     K = new byte[256 / 8];
                     break;
 
                 default:
-                    throw new Exception("Unsupported algorithm: " + alg);
+                    throw new CoseException("Unsupported algorithm: " + alg);
                 }
-                srng.NextBytes(K);
+                s_PRNG.NextBytes(K);
             }
 
             ContentKey = new KeyParameter(K);
@@ -321,11 +429,9 @@ namespace COSE
             return K;
         }
 
-        public void AES_Decrypt(string alg, byte[] K)
+        public void AES_Decrypt(CBORObject alg, byte[] K)
         {
             GcmBlockCipher cipher = new GcmBlockCipher(new AesFastEngine(), new BasicGcmMultiplier());
-            SecureRandom srng = new SecureRandom();
-
             KeyParameter ContentKey;
 
             //  The requirements from JWA
@@ -347,6 +453,67 @@ namespace COSE
             rgbContent = C;
 
         }
+
+        private byte[] AES_CCM(CBORObject alg, byte[] K)
+        {
+            CcmBlockCipher cipher = new CcmBlockCipher(new AesFastEngine());
+            KeyParameter ContentKey;
+            int cbitTag = 64;
+
+            //  The requirements from JWA
+            //  IV is 96 bits
+            //  Authentication tag is 128 bits
+            //  key sizes are 128, 192 and 256 bits
+
+            IV = new byte[96 / 8];
+            s_PRNG.NextBytes(IV);
+
+            if (K == null) {
+                Debug.Assert(alg.Type == CBORType.TextString);
+                switch (alg.AsString()) {
+                case "AES-128-CCM-64":
+                    K = new byte[128 / 8];
+                    cbitTag = 64;
+                    break;
+
+                case "AES-196-CCM-64":
+                    K = new byte[196 / 8];
+                    cbitTag = 64;
+                    break;
+
+                case "AES-256-CCM-64":
+                    K = new byte[256 / 8];
+                    cbitTag = 64;
+                    break;
+
+                default:
+                    throw new CoseException("Unsupported algorithm: " + alg);
+                }
+                s_PRNG.NextBytes(K);
+            }
+
+            ContentKey = new KeyParameter(K);
+
+            //  Build the object to be hashed
+
+            byte[] A = new byte[0];
+            if (objProtected != null) {
+                A = objProtected.EncodeToBytes();
+            }
+
+            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, A);
+
+            cipher.Init(true, parameters);
+
+            byte[] C = new byte[cipher.GetOutputSize(rgbContent.Length)];
+            int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
+            len += cipher.DoFinal(C, len);
+
+            Array.Resize(ref C, C.Length - (128/8) + (cbitTag/8));
+            rgbEncrypted = C;
+
+            return K;
+        }
     }
 
     public enum RecipientType
@@ -360,58 +527,72 @@ namespace COSE
         Key m_key;
         Key m_senderKey;
 
-        public Recipient(Key key, string algorithm = null)
+        public Recipient(Key key, CBORObject algorithm = null)
         {
             if (algorithm != null) {
-                switch (algorithm) {
-                case "dir":  // Direct encryption mode
-                    if (key.AsString("kty") != "oct") throw new Exception("Invalid parameters");
-                    m_recipientType = RecipientType.direct;
-                    break;
+                if (algorithm.Type == CBORType.TextString) {
+                    switch (algorithm.AsString()) {
+                    case "dir":  // Direct encryption mode
+                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid parameters");
+                        m_recipientType = RecipientType.direct;
+                        break;
 
-                case "ECDH-ES":
+                    case "ECDH-ES":
 #if DEBUG
-                case "ECDH-SS":
+                    case "ECDH-SS":
 #endif // DEBUG
-                    if (key.AsString("kty") != "EC") throw new Exception("Invalid Parameters");
-                    m_recipientType = RecipientType.keyAgreeDirect;
-                    break;
+                        if (key.AsString("kty") != "EC") throw new CoseException("Invalid Parameters");
+                        m_recipientType = RecipientType.keyAgreeDirect;
+                        break;
 
-                case "RSA-OAEP":
-                case "RSA-OAEP-256":
-                    if (key.AsString("kty") != "RSA") throw new Exception("Invalid Parameter");
-                    m_recipientType = RecipientType.keyTransport;
-                    break;
+                    case "A128GCMKW":
+                    case "A192GCMKW":
+                    case "A256GCMKW":
+                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.keyWrap;
+                        break;
 
-                case "A128KW":
-                case "A192KW":
-                case "A256KW":
-                case "A128GCMKW":
-                case "A192GCMKW":
-                case "A256GCMKW":
-                    if (key.AsString("kty") != "oct") throw new Exception("Invalid Parameter");
-                    m_recipientType = RecipientType.keyWrap;
-                    break;
+                    case "ECDH-ES+A128KW":
+                    case "ECDH-ES+A192KW":
+                    case "ECDH-ES+A256KW":
+                        if (key.AsString("kty") != "EC") throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.keyAgree;
+                        break;
 
-                case "ECDH-ES+A128KW":
-                case "ECDH-ES+A192KW":
-                case "ECDH-ES+A256KW":
-                    if (key.AsString("kty") != "EC") throw new Exception("Invalid Parameter");
-                    m_recipientType = RecipientType.keyAgree;
-                    break;
+                    case "PBES2-HS256+A128KW":
+                    case "PBES2-HS256+A192KW":
+                    case "PBES-HS256+A256KW":
+                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.password;
+                        break;
 
-                case "PBES2-HS256+A128KW":
-                case "PBES2-HS256+A192KW":
-                case "PBES-HS256+A256KW":
-                    if (key.AsString("kty") != "oct") throw new Exception("Invalid Parameter");
-                    m_recipientType = RecipientType.password;
-                    break;
-
-                default:
-                    throw new Exception("Unrecognized recipient algorithm");
+                    default:
+                        throw new CoseException("Unrecognized recipient algorithm");
+                    }
                 }
+                else if (algorithm.Type == CBORType.Number) {
+                    switch ((AlgorithmValuesInt) algorithm.AsInt32()) {
+                    case AlgorithmValuesInt.RSA_OAEP:
+                    case AlgorithmValuesInt.RSA_OAEP_256:
+                        if (key.AsString("kty") != "RSA") throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.keyTransport;
+                        break;
+
+                    case AlgorithmValuesInt.AES_KW_128:
+                    case AlgorithmValuesInt.AES_KW_192:
+                    case AlgorithmValuesInt.AES_KW_256:
+                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.keyWrap;
+                        break;
+
+                    default:
+                        throw new CoseException("Unrecognized recipient algorithm");
+                    }
+                }
+                else throw new CoseException("Algorithm incorrectly encoded");
+
                 m_key = key;
-                AddUnprotected("alg", algorithm);
+                AddUnprotected(HeaderKeys.Algorithm, algorithm);
             }
             else {
                 switch (key.AsString("kty")) {
@@ -419,46 +600,46 @@ namespace COSE
                     m_recipientType = RecipientType.keyWrap;
                     switch (key.AsBytes("k").Length) {
                     case 128 / 8:
-                        algorithm = "A128KW";
+                        algorithm = AlgorithmValues.AES_KW_128;
                         break;
 
                     case 192 / 8:
-                        algorithm = "A192KW";
+                        algorithm = AlgorithmValues.AES_KW_192;
                         break;
 
                     case 256 / 8:
-                        algorithm = "A256KW";
+                        algorithm = AlgorithmValues.AES_KW_256;
                         break;
 
                     default:
-                        throw new Exception("Key size does not match any algorthms");
+                        throw new CoseException("Key size does not match any algorthms");
                     }
                     break;
 
                 case "RSA":
                     m_recipientType = RecipientType.keyTransport;
-                    algorithm = "RSA-OAEP-256";
+                    algorithm = AlgorithmValues.RSA_OAEP_256;
                     break;
 
                 case "EC":
                     m_recipientType = RecipientType.keyAgree;
-                    algorithm = "ECDH-ES+A128KW";
+                    algorithm = CBORObject.FromObject("ECDH-ES+A128KW");
                     break;
                 }
-                AddUnprotected("alg", algorithm);
+                AddUnprotected(HeaderKeys.Algorithm, CBORObject.FromObject(algorithm));
                 m_key = key;
             }
 
             if (key.ContainsName("use")) {
                 string usage = key.AsString("use");
-                if (usage != "enc") throw new Exception("Key cannot be used for encrytion");
+                if (usage != "enc") throw new CoseException("Key cannot be used for encrytion");
             }
 
             if (key.ContainsName("key_ops")) {
                 CBORObject usageObject = key.AsObject("key_ops");
                 bool validUsage = false;
 
-                if (usageObject.Type != CBORType.Array) throw new Exception("key_ops is incorrectly formed");
+                if (usageObject.Type != CBORType.Array) throw new CoseException("key_ops is incorrectly formed");
                 for (int i = 0; i < usageObject.Count; i++) {
                     switch (usageObject[i].AsString()) {
                     case "encrypt":
@@ -467,10 +648,10 @@ namespace COSE
                         break;
                     }
                 }
-                if (!validUsage) throw new Exception("Key cannot be used for encryption");
+                if (!validUsage) throw new CoseException("Key cannot be used for encryption");
             }
 
-            if (key.ContainsName("kid")) AddUnprotected("kid", key.AsString("kid"));
+            if (key.ContainsName("kid")) AddUnprotected(HeaderKeys.KeyId, key[CBORObject.FromObject("kid")]);
         }
 
         public Recipient()
@@ -480,230 +661,256 @@ namespace COSE
         public RecipientType recipientType { get { return m_recipientType; } }
 
 
-        public byte[] Decrypt(Key key, int cbitCEK, string algCEK)
+        public byte[] Decrypt(Key key, int cbitCEK, CBORObject algCEK)
         {
-            string alg = null;
+            CBORObject alg = null;
             byte[] rgbSecret;
             byte[] rgbKey;
 
             try {
-                alg = FindAttribute("alg").AsString();
+                alg = FindAttribute(HeaderKeys.Algorithm);
             }
-            catch (Exception) {
+            catch (CoseException) {
                 return null;   // This is a bad state
             }
 
-            switch (alg) {
-            case "dir":
-                if (key.AsString("kty") != "oct") return null;
-                return key.AsBytes("k");
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "dir":
+                    if (key.AsString("kty") != "oct") return null;
+                    return key.AsBytes("k");
 
-            case "ECDH-ES":
-                rgbSecret = ECDH_GenerateSecret(key);
-                return KDF(rgbSecret, cbitCEK, algCEK); 
+                case "ECDH-ES":
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    return KDF(rgbSecret, cbitCEK, algCEK);
 
-            case "A128KW": return AES_KeyUnwrap(key, 128);
-            case "A192KW": return AES_KeyUnwrap(key, 192);
-            case "A256KW": return AES_KeyUnwrap(key, 256);
+                case "A128GCMKW": return AES_GCM_KeyUnwrap(key, 128);
+                case "A192GCMKW": return AES_GCM_KeyUnwrap(key, 192);
+                case "A256GCMKW": return AES_GCM_KeyUnwrap(key, 256);
 
-            case "A128GCMKW": return AES_GCM_KeyUnwrap(key, 128);
-            case "A192GCMKW": return AES_GCM_KeyUnwrap(key, 192);
-            case "A256GCMKW": return AES_GCM_KeyUnwrap(key, 256);
+                case "PBES2-HS256+A128KW":
+                    rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 128 / 8, new Sha256Digest());
+                    return AES_KeyUnwrap(null, 128, rgbKey);
 
-            case "PBES2-HS256+A128KW":
-                rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 128 / 8, new Sha256Digest());
-                return AES_KeyUnwrap(null, 128, rgbKey);
+                case "PBES2-HS256+A192KW":
+                    rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 192 / 8, new Sha256Digest());
+                    return AES_KeyUnwrap(null, 192, rgbKey);
 
-            case "PBES2-HS256+A192KW":
-                rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 192 / 8, new Sha256Digest());
-                return AES_KeyUnwrap(null, 192, rgbKey);
+                case "PBES2-HS256+A256KW":
+                    rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 256 / 8, new Sha256Digest());
+                    return AES_KeyUnwrap(null, 256, rgbKey);
 
-            case "PBES2-HS256+A256KW":
-                rgbKey = PBKF2(m_key.AsBytes("k"), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 256 / 8, new Sha256Digest());
-                return AES_KeyUnwrap(null, 256, rgbKey);
+                case "ECDH-ES+A128KW":
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 128, alg);
+                    return AES_KeyUnwrap(null, 128, rgbKey);
 
-            case "RSA-OAEP-256": return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
-            case "RSA-OEAP": return RSA_OAEP_KeyUnwrap(key, new Sha256Digest()); 
+                case "ECDH-ES+A192KW":
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    return AES_KeyUnwrap(null, 192, rgbKey);
 
-            case "ECDH-ES+A128KW":
-                rgbSecret = ECDH_GenerateSecret(key);
-                rgbKey = KDF(rgbSecret, 128, alg);
-                return AES_KeyUnwrap(null, 128, rgbKey);
-
-            case "ECDH-ES+A192KW":
-                rgbSecret = ECDH_GenerateSecret(key);
-                rgbKey = KDF(rgbSecret, 192, alg);
-                return AES_KeyUnwrap(null, 192, rgbKey);
-
-            case "ECDH-ES+A256KW":
-                rgbSecret = ECDH_GenerateSecret(key);
-                rgbKey = KDF(rgbSecret, 256, alg);
-                return AES_KeyUnwrap(null, 256, rgbKey);
+                case "ECDH-ES+A256KW":
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 256, alg);
+                    return AES_KeyUnwrap(null, 256, rgbKey);
+                }
             }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.RSA_OAEP: return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
+                case AlgorithmValuesInt.RSA_OAEP_256: return RSA_OAEP_KeyUnwrap(key, new Sha256Digest());
+
+                case AlgorithmValuesInt.AES_KW_128: return AES_KeyUnwrap(key, 128);
+                case AlgorithmValuesInt.AES_KW_192: return AES_KeyUnwrap(key, 192);
+                case AlgorithmValuesInt.AES_KW_256: return AES_KeyUnwrap(key, 256);
+
+                default:
+                    throw new CoseException("Algorithm not supported " + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm is incorrectly encoded");
 
             return null;
         }
 
         override public void Encrypt()
         {
-            string alg;      // Get the algorithm that was set.
+            CBORObject alg;      // Get the algorithm that was set.
             byte[] rgbSecret;
             byte[] rgbKey;
             CBORObject objSalt;
             CBORObject objIterCount;
-            SecureRandom sRandom;
 
-                alg = FindAttribute("alg").AsString();
+            alg = FindAttribute(HeaderKeys.Algorithm);
 
-            switch (alg) {
-            case "dir":
-            case "ECDH-ES":
-            case "ECDH-SS":
-                break;
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "dir":
+                case "ECDH-ES":
+                case "ECDH-SS":
+                    break;
 
-            case "A128KW": AES_KeyWrap(128); break;
-            case "A192KW": AES_KeyWrap(192); break;
-            case "A256KW": AES_KeyWrap(256); break;
+                case "ECDH-ES+A128KW":
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 128, alg);
+                    AES_KeyWrap(128, rgbKey);
+                    break;
 
-            case "RSA-OAEP": RSA_OAEP_KeyWrap(new Sha1Digest()); break;
-            case "RSA-OAEP-256": RSA_OAEP_KeyWrap(new Sha256Digest()); break;
+                case "ECDH-ES+A192KW":
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    AES_KeyWrap(192, rgbKey);
+                    break;
 
-            case "ECDH-ES+A128KW":
-                ECDH_GenerateEphemeral();
-                rgbSecret = ECDH_GenerateSecret(m_key);
-                rgbKey = KDF(rgbSecret, 128, alg);
-                AES_KeyWrap(128, rgbKey);
-                break;
+                case "ECDH-ES+A256KW":
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    AES_KeyWrap(192, rgbKey);
+                    break;
 
-            case "ECDH-ES+A192KW":
-                ECDH_GenerateEphemeral();
-                rgbSecret = ECDH_GenerateSecret(m_key);
-                rgbKey = KDF(rgbSecret, 192, alg);
-                AES_KeyWrap(192, rgbKey);
-                break;
+                case "A128GCMKW": AES_GCM_KeyWrap(128); break;
+                case "A192GCMKW": AES_GCM_KeyWrap(192); break;
+                case "A256GCMKW": AES_GCM_KeyWrap(256); break;
 
-            case "ECDH-ES+A256KW":
-                ECDH_GenerateEphemeral();
-                rgbSecret = ECDH_GenerateSecret(m_key);
-                rgbKey = KDF(rgbSecret, 192, alg);
-                AES_KeyWrap(192, rgbKey);
-                break;
+                case "PBES2-HS256+A128KW":
+                    objSalt = FindAttribute("p2s");
+                    if (objSalt == null) {
+                        byte[] salt = new byte[10];
+                        s_PRNG.NextBytes(salt);
+                        objSalt = CBORObject.FromObject(salt);
+                        AddUnprotected("p2s", objSalt);
+                    }
+                    objIterCount = FindAttribute("p2c");
+                    if (objIterCount == null) {
+                        objIterCount = CBORObject.FromObject(8000);
+                        AddUnprotected("p2c", objIterCount);
+                    }
+                    rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 128 / 8, new Sha256Digest());
+                    AES_KeyWrap(128, rgbKey);
+                    break;
 
-            case "A128GCMKW": AES_GCM_KeyWrap(128); break;
-            case "A192GCMKW": AES_GCM_KeyWrap(192); break;
-            case "A256GCMKW": AES_GCM_KeyWrap(256); break;
+                case "PBES2-HS384+A192KW":
+                    objSalt = FindAttribute("p2s");
+                    if (objSalt == null) {
+                        byte[] salt = new byte[10];
+                        s_PRNG.NextBytes(salt);
+                        objSalt = CBORObject.FromObject(salt);
+                        AddUnprotected("p2s", objSalt);
+                    }
+                    objIterCount = FindAttribute("p2c");
+                    if (objIterCount == null) {
+                        objIterCount = CBORObject.FromObject(8000);
+                        AddUnprotected("p2c", objIterCount);
+                    }
+                    rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 192 / 8, new Sha256Digest());
+                    AES_KeyWrap(192, rgbKey);
+                    break;
 
-            case "PBES2-HS256+A128KW":
-                objSalt = FindAttribute("p2s");
-                if (objSalt == null) {
-                    sRandom = new SecureRandom();
-                    byte[] salt = new byte[10];
-                    sRandom.NextBytes(salt);
-                    objSalt = CBORObject.FromObject(salt);
-                    AddUnprotected("p2s", objSalt);
+                case "PBES2-HS512+256KW":
+                    objSalt = FindAttribute("p2s");
+                    if (objSalt == null) {
+                        byte[] salt = new byte[10];
+                        s_PRNG.NextBytes(salt);
+                        objSalt = CBORObject.FromObject(salt);
+                        AddUnprotected("p2s", objSalt);
+                    }
+                    objIterCount = FindAttribute("p2c");
+                    if (objIterCount == null) {
+                        objIterCount = CBORObject.FromObject(8000);
+                        AddUnprotected("p2c", objIterCount);
+                    }
+                    rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 256 / 8, new Sha256Digest());
+                    AES_KeyWrap(256, rgbKey);
+                    break;
+
+                default:
+                    throw new CoseException("Unknown or unsupported algorithm: " + alg);
                 }
-                objIterCount = FindAttribute("p2c");
-                if (objIterCount == null) {
-                    objIterCount = CBORObject.FromObject(  8000);
-                    AddUnprotected("p2c", objIterCount);
-                }
-                rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 128 / 8, new Sha256Digest());
-                AES_KeyWrap(128, rgbKey);
-                break;
-
-            case "PBES2-HS384+A192KW":
-                objSalt = FindAttribute("p2s");
-                if (objSalt == null) {
-                    sRandom = new SecureRandom();
-                    byte[] salt = new byte[10];
-                    sRandom.NextBytes(salt);
-                    objSalt = CBORObject.FromObject(salt);
-                    AddUnprotected("p2s", objSalt);
-                }
-                objIterCount = FindAttribute("p2c");
-                if (objIterCount == null) {
-                    objIterCount = CBORObject.FromObject(8000);
-                    AddUnprotected("p2c", objIterCount);
-                }
-                rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 192 / 8, new Sha256Digest());
-                AES_KeyWrap(192, rgbKey);
-                break;
-
-            case "PBES2-HS512+256KW":
-                objSalt = FindAttribute("p2s");
-                if (objSalt == null) {
-                    sRandom = new SecureRandom();
-                    byte[] salt = new byte[10];
-                    sRandom.NextBytes(salt);
-                    objSalt = CBORObject.FromObject(salt);
-                    AddUnprotected("p2s", objSalt);
-                }
-                objIterCount = FindAttribute("p2c");
-                if (objIterCount == null) {
-                    objIterCount = CBORObject.FromObject(  8000);
-                    AddUnprotected("p2c", objIterCount);
-                }
-                rgbKey = PBKF2(m_key.AsBytes("k"), objSalt.GetByteString(), objIterCount.AsInt32(), 256 / 8, new Sha256Digest());
-                AES_KeyWrap(256, rgbKey);
-                break;
-
-            default:
-                throw new Exception("Unknown or unsupported algorithm: " + alg);
             }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.RSA_OAEP: RSA_OAEP_KeyWrap(new Sha1Digest()); break;
+                case AlgorithmValuesInt.RSA_OAEP_256: RSA_OAEP_KeyWrap(new Sha256Digest()); break;
 
+                case AlgorithmValuesInt.AES_KW_128: AES_KeyWrap(128); break;
+                case AlgorithmValuesInt.AES_KW_192: AES_KeyWrap(192); break;
+                case AlgorithmValuesInt.AES_KW_256: AES_KeyWrap(256); break;
+
+                default:
+                    throw new CoseException("Unknown or unsupported algorithm: " + alg);
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
         }
 
-        public byte[] GetKey(string alg)
+        public byte[] GetKey(CBORObject alg)
         {
             if (m_key == null) return null;
 
             try {
-                string keyAlgorithm = m_key.AsString("alg");
-                if (alg != keyAlgorithm) throw new Exception("Algorithm mismatch between message and key");
+                CBORObject keyAlgorithm = m_key[HeaderKeys.Algorithm];
+                if ((keyAlgorithm != null) && (alg != keyAlgorithm)) throw new CoseException("Algorithm mismatch between message and key");
             }
-            catch(Exception) {}
+            catch(CoseException) {}
 
             //  Figure out how longer the needed key is:
 
             int cbitKey;
-            switch (alg) {
-            case "A128GCM":
-                cbitKey = 128;
-                break;
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-128-CCM-64":
+                    cbitKey = 128;
+                    break;
 
-            case "A192GCM":
-                cbitKey = 196;
-                break;
+                case "HS384":
+                    cbitKey = 384;
+                    break;
 
-            case "A256GCM":
-            case "HS256":
-                cbitKey = 256;
-                break;
-
-            case "HS384":
-                cbitKey = 384;
-                break;
-
-            case "HS512":
-                cbitKey = 512;
-                break;
-
-            default:
-                throw new Exception("NYI");
+                default:
+                    throw new CoseException("NYI");
+                }
             }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
+                    cbitKey = 128;
+                    break;
 
-            string algKeyManagement = FindAttribute("alg").AsString();
+                case AlgorithmValuesInt.AES_GCM_192:
+                    cbitKey = 192;
+                    break;
+
+                case AlgorithmValuesInt.AES_GCM_256:
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_512:
+                    cbitKey = 512;
+                    break;
+
+                default:
+                    throw new CoseException("NYI");
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+            string algKeyManagement = FindAttribute(HeaderKeys.Algorithm).AsString();
 
             switch (algKeyManagement) {
             case "dir":
-                if (m_key.AsString("kty") != "oct") throw new Exception("Key and key managment algorithm don't match");
+                if (m_key.AsString("kty") != "oct") throw new CoseException("Key and key managment algorithm don't match");
                 byte[] rgb =  m_key.AsBytes("k");
-                if (rgb.Length * 8 != cbitKey) throw new Exception("Incorrect key size");
+                if (rgb.Length * 8 != cbitKey) throw new CoseException("Incorrect key size");
                 return rgb;
 
             case "ECDH-ES":
                 {
-                    if (m_key.AsString("kty") != "EC") throw new Exception("Key and key management algorithm don't match");
+                    if (m_key.AsString("kty") != "EC") throw new CoseException("Key and key management algorithm don't match");
 
                     ECDH_GenerateEphemeral();
 
@@ -713,7 +920,7 @@ namespace COSE
                 }
 
             case "ECDH-SS": {
-                    if (m_key.AsString("kty") != "EC") throw new Exception("Key and key managment algorithm don't match");
+                    if (m_key.AsString("kty") != "EC") throw new CoseException("Key and key managment algorithm don't match");
                     if (FindAttribute("apu") == null) {
                         byte[] rgbAPU = new byte[512 / 8];
                         s_PRNG.NextBytes(rgbAPU);
@@ -725,7 +932,12 @@ namespace COSE
 
             }
          
-            throw new Exception("NYI");
+            throw new CoseException("NYI");
+        }
+
+        public void SetSenderKey(COSE.Key senderKey)
+        {
+            m_senderKey = senderKey;
         }
 
         public void SetSenderKey(COSE.Key senderKey)
@@ -736,11 +948,11 @@ namespace COSE
         private void AES_KeyWrap(int keySize, byte[] rgbKey = null)
         {
             if (rgbKey == null) {
-                if (m_key.AsString("kty") != "oct") throw new Exception("Key is not correct type");
+                if (m_key.AsString("kty") != "oct") throw new CoseException("Key is not correct type");
 
                 rgbKey = m_key.AsBytes("k");
             }
-            if (rgbKey.Length != keySize / 8) throw new Exception("Key is not the correct size");
+            if (rgbKey.Length != keySize / 8) throw new CoseException("Key is not the correct size");
 
             AesWrapEngine foo = new AesWrapEngine();
             KeyParameter parameters = new KeyParameter(rgbKey);
@@ -754,7 +966,7 @@ namespace COSE
                 if (keyObject.AsString("kty") != "oct") return null;
                 rgbKey = keyObject.AsBytes("k");
             }
-            if (rgbKey.Length != keySize / 8) throw new Exception("Key is not the correct size");
+            if (rgbKey.Length != keySize / 8) throw new CoseException("Key is not the correct size");
 
             AesWrapEngine foo = new AesWrapEngine();
             KeyParameter parameters = new KeyParameter(rgbKey);
@@ -768,7 +980,7 @@ namespace COSE
             IAsymmetricBlockCipher cipher = new OaepEncoding(new RsaEngine(), digest);
             RsaKeyParameters pubParameters = new RsaKeyParameters(false, m_key.AsBigInteger("n"), m_key.AsBigInteger("e"));
 
-            cipher.Init(true, new ParametersWithRandom(pubParameters));
+            cipher.Init(true, new ParametersWithRandom(pubParameters, s_PRNG));
 
             byte[] outBytes = cipher.ProcessBlock(rgbContent, 0, rgbContent.Length);
 
@@ -790,13 +1002,11 @@ namespace COSE
 
         private void AES_GCM_KeyWrap(int keySize)
         {
-            if (m_key.AsString("kty") != "oct") throw new Exception("Incorrect key type") ;
+            if (m_key.AsString("kty") != "oct") throw new CoseException("Incorrect key type") ;
             byte[] keyBytes = m_key.AsBytes("k");
-            if (keyBytes.Length != keySize / 8) throw new Exception("Key is not the correct size");
+            if (keyBytes.Length != keySize / 8) throw new CoseException("Key is not the correct size");
 
             GcmBlockCipher cipher = new GcmBlockCipher(new AesFastEngine(), new BasicGcmMultiplier());
-            SecureRandom srng = new SecureRandom();
-
             KeyParameter ContentKey;
 
             //  The requirements from JWA
@@ -818,7 +1028,7 @@ namespace COSE
             len += cipher.ProcessBytes(tag, 0, tag.Length, C, len);
             len += cipher.DoFinal(C, len);
 
-            if (len != C.Length) throw new Exception("NYI");
+            if (len != C.Length) throw new CoseException("NYI");
             rgbEncrypted = C;
             return;
 
@@ -828,11 +1038,9 @@ namespace COSE
         {
             if (key.AsString("kty") != "oct") return null;
             byte[] keyBytes = key.AsBytes("k");
-            if (keyBytes.Length != keySize / 8) throw new Exception("Key is not the correct size");
+            if (keyBytes.Length != keySize / 8) throw new CoseException("Key is not the correct size");
 
             GcmBlockCipher cipher = new GcmBlockCipher(new AesFastEngine(), new BasicGcmMultiplier());
-            SecureRandom srng = new SecureRandom();
-
             KeyParameter ContentKey;
 
             //  The requirements from JWA
@@ -854,20 +1062,18 @@ namespace COSE
             len += cipher.ProcessBytes(tag, 0, tag.Length, C, len);
             len += cipher.DoFinal(C, len);
 
-            if (len != C.Length) throw new Exception("NYI");
+            if (len != C.Length) throw new CoseException("NYI");
             return C;
 
         }
 
         private void ECDH_GenerateEphemeral()
         {
-            SecureRandom random = new SecureRandom();
-
             X9ECParameters p = NistNamedCurves.GetByName(m_key.AsString("crv"));
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
             ECKeyPairGenerator pGen = new ECKeyPairGenerator();
-            ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, random);
+            ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, s_PRNG);
             pGen.Init(genParam);
 
             AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
@@ -876,8 +1082,8 @@ namespace COSE
             epk.Add("kty", "EC");
             epk.Add("crv", m_key.AsString("crv"));
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add("x", priv.Q.X.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add("y", priv.Q.Y.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add("x", priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add("y", priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
             AddUnprotected("epk", epk);
         }
 
@@ -885,25 +1091,25 @@ namespace COSE
         {
             Key epk;
 
-            if (key.AsString("kty") != "EC") throw new Exception("Not an EC Key");
+            if (key.AsString("kty") != "EC") throw new CoseException("Not an EC Key");
 
             if (m_senderKey != null) {
                 epk = m_senderKey;
             }
             else {
                 CBORObject epkT = FindAttribute("epk");
-                if (epkT == null) throw new Exception("No Ephemeral key");
+                if (epkT == null) throw new CoseException("No Ephemeral key");
                 epk = new Key(epkT);
             }
 
-            if (epk.AsString("crv") != key.AsString("crv")) throw new Exception("not a match of curves");
+            if (epk.AsString("crv") != key.AsString("crv")) throw new CoseException("not a match of curves");
 
             //  Get the curve
 
             X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"), false);
+            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
             ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
             ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
@@ -916,8 +1122,9 @@ namespace COSE
             return k1.ToByteArrayUnsigned();
         }
 
-        private byte[] KDF(byte[] secret, int cbitKey, string algorithmID)
+        private byte[] KDF(byte[] secret, int cbitKey, CBORObject algorithmID)
         {
+#if USE_OLD_KDF
             //  Build a long byte array
             //  four byte counter
             //  secret
@@ -929,7 +1136,8 @@ namespace COSE
 
             byte[] rgbPartyU = new byte[0];
             byte[] rgbPartyV = new byte[0];
-            byte[] algId = UTF8Encoding.ASCII.GetBytes(algorithmID);
+            Debug.Assert(algorithmID.Type == CBORType.TextString);
+            byte[] algId = UTF8Encoding.ASCII.GetBytes(algorithmID.AsString());
 
             CBORObject j = FindAttribute("apu");
             if (j != null) rgbPartyU = j.GetByteString();
@@ -945,22 +1153,25 @@ namespace COSE
             Array.Copy(secret, 0, rgb, 4, secret.Length);
             c = 4 + secret.Length;
 
-            if (algorithmID.Length > 255) throw new Exception("Internal error");
-            rgb[c + 3] = (byte) algId.Length;
-            Array.Copy(algId, 0, rgb, c + 4, algId.Length);
-            c += 4 + algorithmID.Length;
+            if (algorithmID.Type == CBORType.TextString) {
+                if (algorithmID.AsString().Length > 255) throw new CoseException("Internal error");
+                rgb[c + 3] = (byte) algId.Length;
+                Array.Copy(algId, 0, rgb, c + 4, algId.Length);
+                c += 4 + algorithmID.AsString().Length;
+            }
+            else throw new CoseException("Unknown encoding for algorithm identifier in KDF function");
 
-            if (rgbPartyU.Length > 255) throw new Exception("Internal error");
+            if (rgbPartyU.Length > 255) throw new CoseException("Internal error");
             rgb[c + 3] = (byte) rgbPartyU.Length;
             Array.Copy(rgbPartyU, 0, rgb, c + 4, rgbPartyU.Length);
             c += 4 + rgbPartyU.Length;
 
-            if (rgbPartyV.Length > 255) throw new Exception("internal error");
+            if (rgbPartyV.Length > 255) throw new CoseException("internal error");
             rgb[c + 3] = (byte) rgbPartyV.Length;
             Array.Copy(rgbPartyV, 0, rgb, c + 4, rgbPartyV.Length);
             c += 4 + rgbPartyV.Length;
 
-            if (cbitKey / (256 * 256) != 0) throw new Exception("internal error");
+            if (cbitKey / (256 * 256) != 0) throw new CoseException("internal error");
             rgb[c + 3] = (byte) (cbitKey % 256);
             rgb[c + 2] = (byte) (cbitKey / 256);
 
@@ -980,36 +1191,41 @@ namespace COSE
             byte[] rgbOut = new byte[cbitKey / 8];
             Array.Copy(rgbDigest, rgbOut, rgbOut.Length);
             return rgbOut;
-            /*
-             *                     //  Do the KDF function
+#else
 
-                    CBORObject dataArray = CBORObject.NewArray();
-                    dataArray.Add(0);
-                    dataArray.Add(k1.ToByteArray());
+            //  Do the KDF function
+            byte[] rgbIter = new byte[4];
 
-                    string PartyUInfo = null;
-                    if (objUnprotected.ContainsKey("PartyUInfo")) PartyUInfo = objUnprotected["PartyUInfo"].AsString();
-                    dataArray.Add(PartyUInfo);
+            CBORObject dataArray = CBORObject.NewArray();
+            dataArray.Add(algorithmID);
 
-                    string PartyVInfo = null;
-                    if (objUnprotected.ContainsKey("PartyVInfo")) PartyUInfo = objUnprotected["PartyVInfo"].AsString();
-                    dataArray.Add(PartyVInfo);
+            string PartyUInfo = null;
+            if (objUnprotected.ContainsKey("PartyUInfo")) PartyUInfo = objUnprotected["PartyUInfo"].AsString();
+            dataArray.Add(PartyUInfo);
 
-                    byte[] SubPubInfo = new byte[4];
-                    SubPubInfo[3] = (byte) cbitKey;
-                    dataArray.Add(SubPubInfo);
+            string PartyVInfo = null;
+            if (objUnprotected.ContainsKey("PartyVInfo")) PartyVInfo = objUnprotected["PartyVInfo"].AsString();
+            dataArray.Add(PartyVInfo);
 
-                    dataArray.Add(null); // SubPrivInfo
+            byte[] SubPubInfo = new byte[4];
+            SubPubInfo[3] = (byte) cbitKey;
+            dataArray.Add(SubPubInfo);
 
-                    byte[] rgbData = dataArray.EncodeToBytes();
-                    Sha256Digest sha256 = new Sha256Digest();
-                    sha256.BlockUpdate(rgbData, 0, rgbData.Length);
-                    byte[] rgbOut = new byte[sha256.GetByteLength()];
-                    sha256.DoFinal(rgbOut, 0);
+            dataArray.Add(null); // SubPrivInfo
 
-                    byte[] rgbResult = new byte[cbitKey / 8];
-                    Array.Copy(rgbOut, rgbResult, rgbResult.Length);
-*/
+            byte[] rgbData = dataArray.EncodeToBytes();
+            Sha256Digest sha256 = new Sha256Digest();
+            sha256.BlockUpdate(rgbIter, 0, rgbIter.Length);
+            sha256.BlockUpdate(secret, 0, rgbIter.Length);
+            sha256.BlockUpdate(rgbData, 0, rgbData.Length);
+            byte[] rgbOut = new byte[sha256.GetByteLength()];
+            sha256.DoFinal(rgbOut, 0);
+
+            byte[] rgbResult = new byte[cbitKey / 8];
+            Array.Copy(rgbOut, rgbResult, rgbResult.Length);
+
+            return rgbResult;
+#endif
         }
 
         public static byte[] PBKF2(byte[] password, byte[] salt, int iterCount, int cOctets, IDigest digest)

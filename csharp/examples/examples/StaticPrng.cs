@@ -9,7 +9,7 @@ using Org.BouncyCastle.Security;
 
 namespace examples
 {
-    public class StaticPrng :  IRandomGenerator
+    public class StaticPrng :  SecureRandom
     {
         byte[] m_rgbRngData = new byte[0];
         int m_iRngData;
@@ -20,7 +20,7 @@ namespace examples
         /// <param name="seed">A byte array to be mixed into the generator's state.</param>
         public void AddSeedMaterial(byte[] seed)
         {
-            m_rgbRngData = seed;
+            m_rgbRngData = m_rgbRngData.Concat(seed).ToArray();
             m_iRngData = 0;
         }
 
@@ -33,7 +33,7 @@ namespace examples
 
         /// <summary>Fill byte array with random values.</summary>
         /// <param name="bytes">Array to be filled.</param>
-        public void NextBytes(byte[] bytes)
+        override public void NextBytes(byte[] bytes)
         {
             NextBytes(bytes, 0, bytes.Length);
         }
@@ -42,7 +42,7 @@ namespace examples
         /// <param name="bytes">Array to receive bytes.</param>
         /// <param name="start">Index to start filling at.</param>
         /// <param name="len">Length of segment to fill.</param>
-        public void NextBytes(byte[] bytes, int start, int len)
+        override public void NextBytes(byte[] bytes, int start, int len)
         {
 
             if (m_iRngData + len > m_rgbRngData.Length) {
