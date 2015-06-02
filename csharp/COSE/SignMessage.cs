@@ -77,6 +77,8 @@ namespace COSE
 #if USE_ARRAY
             obj = CBORObject.NewArray();
             obj.Add(3);  // Tag as an MAC item
+            obj.Add(1);  // Tag as an Signed item
+
 #else
             obj = CBORObject.NewMap();
             obj.Add(RecordKeys.MsgType, 3);  // Tag as an MAC item
@@ -208,6 +210,7 @@ namespace COSE
                 obj.Add(objProtected.EncodeToBytes());
             }
             else obj.Add(null);
+
             if ((objUnprotected == null) || (objUnprotected.Count == 0)) obj.Add(null);
             else obj.Add(objUnprotected); // Add unprotected attributes
 

@@ -940,6 +940,11 @@ namespace COSE
             m_senderKey = senderKey;
         }
 
+        public void SetSenderKey(COSE.Key senderKey)
+        {
+            m_senderKey = senderKey;
+        }
+
         private void AES_KeyWrap(int keySize, byte[] rgbKey = null)
         {
             if (rgbKey == null) {
