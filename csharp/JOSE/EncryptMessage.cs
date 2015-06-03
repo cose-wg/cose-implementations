@@ -1174,7 +1174,7 @@ namespace JOSE
             X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"), false);
+            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
             ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
             ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
@@ -1232,7 +1232,7 @@ namespace JOSE
             X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"), false);
+            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
             ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
             ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
