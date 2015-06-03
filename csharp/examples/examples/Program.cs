@@ -513,42 +513,6 @@ namespace examples
             return key;
         }
 
-        static COSE.Key GetKey(JSON control)
-        {
-            COSE.Key key = new COSE.Key();
-
-            foreach (KeyValuePair<string, JSON> pair in control.map) {
-                switch (pair.Key) {
-                case "kty":
-                case "kid":
-                case "use":
-                case "enc":
-                case "crv":
-                case "alg":
-                    key.Add(pair.Key, pair.Value.AsString());
-                    break;
-
-                case "x":
-                case "y":
-                case "d":
-                case "k":
-                case "e":
-                case "n":
-                case "p":
-                case "q":
-                case "dp":
-                case "dq":
-                case "qi":
-                    key.Add(pair.Key, base64urldecode(pair.Value.AsString()));
-                    break;
-
-                default:
-                    throw new Exception("Unrecognized field name " + pair.Key + " in key object");
-                }
-            }
-            return key;
-        }
-
         static byte[] base64urldecode(string arg)
         {
             string s = arg;

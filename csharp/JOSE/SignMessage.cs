@@ -448,7 +448,7 @@ namespace JOSE
                     X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
                     ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
                     ECPoint point = p.Curve.CreatePoint(key.AsBigInteger("x"
-                        ), key.AsBigInteger("y"), false); 
+                        ), key.AsBigInteger("y")); 
                     ECPublicKeyParameters pubKey = new ECPublicKeyParameters(point, parameters);
 
                     ECDsaSigner ecdsa = new ECDsaSigner();
