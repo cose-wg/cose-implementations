@@ -23,8 +23,6 @@ namespace COSE
 {
     public class MACMessage : Message
     {
-        CBORObject obj;
-
         byte[] rgbTag;
         byte[] rgbContent;
 

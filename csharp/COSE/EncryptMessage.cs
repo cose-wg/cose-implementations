@@ -533,7 +533,7 @@ namespace COSE
                 if (algorithm.Type == CBORType.TextString) {
                     switch (algorithm.AsString()) {
                     case "dir":  // Direct encryption mode
-                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid parameters");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid parameters");
                         m_recipientType = RecipientType.direct;
                         break;
 
@@ -541,28 +541,28 @@ namespace COSE
 #if DEBUG
                     case "ECDH-SS":
 #endif // DEBUG
-                        if (key.AsString("kty") != "EC") throw new CoseException("Invalid Parameters");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameters");
                         m_recipientType = RecipientType.keyAgreeDirect;
                         break;
 
                     case "A128GCMKW":
                     case "A192GCMKW":
                     case "A256GCMKW":
-                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyWrap;
                         break;
 
                     case "ECDH-ES+A128KW":
                     case "ECDH-ES+A192KW":
                     case "ECDH-ES+A256KW":
-                        if (key.AsString("kty") != "EC") throw new CoseException("Invalid Parameter");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyAgree;
                         break;
 
                     case "PBES2-HS256+A128KW":
                     case "PBES2-HS256+A192KW":
                     case "PBES-HS256+A256KW":
-                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.password;
                         break;
 
@@ -574,14 +574,14 @@ namespace COSE
                     switch ((AlgorithmValuesInt) algorithm.AsInt32()) {
                     case AlgorithmValuesInt.RSA_OAEP:
                     case AlgorithmValuesInt.RSA_OAEP_256:
-                        if (key.AsString("kty") != "RSA") throw new CoseException("Invalid Parameter");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_RSA) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyTransport;
                         break;
 
                     case AlgorithmValuesInt.AES_KW_128:
                     case AlgorithmValuesInt.AES_KW_192:
                     case AlgorithmValuesInt.AES_KW_256:
-                        if (key.AsString("kty") != "oct") throw new CoseException("Invalid Parameter");
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyWrap;
                         break;
 
@@ -595,40 +595,46 @@ namespace COSE
                 AddUnprotected(HeaderKeys.Algorithm, algorithm);
             }
             else {
-                switch (key.AsString("kty")) {
-                case "oct":
-                    m_recipientType = RecipientType.keyWrap;
-                    switch (key.AsBytes("k").Length) {
-                    case 128 / 8:
-                        algorithm = AlgorithmValues.AES_KW_128;
+                if (key[CoseKeyKeys.KeyType].Type == CBORType.Number) {
+                    switch ((GeneralValuesInt) key[CoseKeyKeys.KeyType].AsInt32()) {
+                    case GeneralValuesInt.KeyType_Octet:
+                        m_recipientType = RecipientType.keyWrap;
+                        switch (key.AsBytes("k").Length) {
+                        case 128 / 8:
+                            algorithm = AlgorithmValues.AES_KW_128;
+                            break;
+
+                        case 192 / 8:
+                            algorithm = AlgorithmValues.AES_KW_192;
+                            break;
+
+                        case 256 / 8:
+                            algorithm = AlgorithmValues.AES_KW_256;
+                            break;
+
+                        default:
+                            throw new CoseException("Key size does not match any algorthms");
+                        }
                         break;
 
-                    case 192 / 8:
-                        algorithm = AlgorithmValues.AES_KW_192;
+                    case GeneralValuesInt.KeyType_RSA:
+                        m_recipientType = RecipientType.keyTransport;
+                        algorithm = AlgorithmValues.RSA_OAEP_256;
                         break;
 
-                    case 256 / 8:
-                        algorithm = AlgorithmValues.AES_KW_256;
+                    case GeneralValuesInt.KeyType_EC:
+                        m_recipientType = RecipientType.keyAgree;
+                        algorithm = CBORObject.FromObject("ECDH-ES+A128KW");
                         break;
-
-                    default:
-                        throw new CoseException("Key size does not match any algorthms");
                     }
-                    break;
-
-                case "RSA":
-                    m_recipientType = RecipientType.keyTransport;
-                    algorithm = AlgorithmValues.RSA_OAEP_256;
-                    break;
-
-                case "EC":
-                    m_recipientType = RecipientType.keyAgree;
-                    algorithm = CBORObject.FromObject("ECDH-ES+A128KW");
-                    break;
+                    AddUnprotected(HeaderKeys.Algorithm, algorithm);
+                    m_key = key;
                 }
-                AddUnprotected(HeaderKeys.Algorithm, CBORObject.FromObject(algorithm));
-                m_key = key;
-            }
+                else if (key[CoseKeyKeys.KeyType].Type == CBORType.TextString) {
+                    throw new CoseException("Unsupported key type");
+                }
+                else throw new CoseException("Invalid encoding for key type");
+            } 
 
             if (key.ContainsName("use")) {
                 string usage = key.AsString("use");
@@ -651,7 +657,7 @@ namespace COSE
                 if (!validUsage) throw new CoseException("Key cannot be used for encryption");
             }
 
-            if (key.ContainsName("kid")) AddUnprotected(HeaderKeys.KeyId, key[CBORObject.FromObject("kid")]);
+            if (key[CoseKeyKeys.KeyIdentifier] != null) AddUnprotected(HeaderKeys.KeyId, key[CoseKeyKeys.KeyIdentifier]);
         }
 
         public Recipient()
@@ -851,12 +857,9 @@ namespace COSE
         {
             if (m_key == null) return null;
 
-            try {
-                CBORObject keyAlgorithm = m_key[HeaderKeys.Algorithm];
-                if ((keyAlgorithm != null) && (alg != keyAlgorithm)) throw new CoseException("Algorithm mismatch between message and key");
-            }
-            catch(CoseException) {}
-
+             //   CBORObject keyAlgorithm = m_key[HeaderKeys.Algorithm];
+             //   if ((keyAlgorithm != null) && (!alg.Equals(keyAlgorithm))) throw new CoseException("Algorithm mismatch between message and key");
+  
             //  Figure out how longer the needed key is:
 
             int cbitKey;
@@ -903,14 +906,14 @@ namespace COSE
 
             switch (algKeyManagement) {
             case "dir":
-                if (m_key.AsString("kty") != "oct") throw new CoseException("Key and key managment algorithm don't match");
+                if (m_key[CoseKeyKeys.KeyType]  != GeneralValues.KeyType_Octet) throw new CoseException("Key and key managment algorithm don't match");
                 byte[] rgb =  m_key.AsBytes("k");
                 if (rgb.Length * 8 != cbitKey) throw new CoseException("Incorrect key size");
                 return rgb;
 
             case "ECDH-ES":
                 {
-                    if (m_key.AsString("kty") != "EC") throw new CoseException("Key and key management algorithm don't match");
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
 
                     ECDH_GenerateEphemeral();
 
@@ -920,7 +923,7 @@ namespace COSE
                 }
 
             case "ECDH-SS": {
-                    if (m_key.AsString("kty") != "EC") throw new CoseException("Key and key managment algorithm don't match");
+                if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
                     if (FindAttribute("apu") == null) {
                         byte[] rgbAPU = new byte[512 / 8];
                         s_PRNG.NextBytes(rgbAPU);
@@ -943,7 +946,9 @@ namespace COSE
         private void AES_KeyWrap(int keySize, byte[] rgbKey = null)
         {
             if (rgbKey == null) {
-                if (m_key.AsString("kty") != "oct") throw new CoseException("Key is not correct type");
+                CBORObject cborKeyType = m_key[CoseKeyKeys.KeyType];
+                if ((cborKeyType == null) || (cborKeyType.Type != CBORType.Number) ||
+                    (cborKeyType.AsInt32() != (int) GeneralValuesInt.KeyType_Octet)) throw new CoseException("Key is not correct type");
 
                 rgbKey = m_key.AsBytes("k");
             }
@@ -958,7 +963,10 @@ namespace COSE
         private byte[] AES_KeyUnwrap(Key keyObject, int keySize, byte[] rgbKey=null)
         {
             if (keyObject != null) {
-                if (keyObject.AsString("kty") != "oct") return null;
+                CBORObject cborKeyType = m_key[CoseKeyKeys.KeyType];
+                if ((cborKeyType == null) || (cborKeyType.Type != CBORType.Number) ||
+                    (cborKeyType.AsInt32() != (int) GeneralValuesInt.KeyType_Octet)) throw new CoseException("Key is not correct type");
+
                 rgbKey = keyObject.AsBytes("k");
             }
             if (rgbKey.Length != keySize / 8) throw new CoseException("Key is not the correct size");
@@ -973,7 +981,7 @@ namespace COSE
         private void RSA_OAEP_KeyWrap(IDigest digest)
         {
             IAsymmetricBlockCipher cipher = new OaepEncoding(new RsaEngine(), digest);
-            RsaKeyParameters pubParameters = new RsaKeyParameters(false, m_key.AsBigInteger("n"), m_key.AsBigInteger("e"));
+            RsaKeyParameters pubParameters = new RsaKeyParameters(false, m_key.AsBigInteger(CoseKeyParameterKeys.RSA_n), m_key.AsBigInteger(CoseKeyParameterKeys.RSA_e));
 
             cipher.Init(true, new ParametersWithRandom(pubParameters, s_PRNG));
 
@@ -985,7 +993,7 @@ namespace COSE
         private byte[] RSA_OAEP_KeyUnwrap(Key key, IDigest digest)
         {
             IAsymmetricBlockCipher cipher = new OaepEncoding(new RsaEngine(), digest);
-            RsaKeyParameters pubParameters = new RsaKeyParameters(false, key.AsBigInteger("n"), key.AsBigInteger("e"));
+            RsaKeyParameters pubParameters = new RsaKeyParameters(false, key.AsBigInteger(CoseKeyParameterKeys.RSA_n), key.AsBigInteger(CoseKeyParameterKeys.RSA_e));
 
             cipher.Init(true, new ParametersWithRandom(pubParameters));
 
@@ -1064,7 +1072,7 @@ namespace COSE
 
         private void ECDH_GenerateEphemeral()
         {
-            X9ECParameters p = NistNamedCurves.GetByName(m_key.AsString("crv"));
+            X9ECParameters p = m_key.GetCurve();
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
             ECKeyPairGenerator pGen = new ECKeyPairGenerator();
@@ -1074,40 +1082,41 @@ namespace COSE
             AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
 
             CBORObject epk = CBORObject.NewMap();
-            epk.Add("kty", "EC");
-            epk.Add("crv", m_key.AsString("crv"));
+            epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
+            epk.Add(CoseKeyParameterKeys.EC_Curve, m_key[CoseKeyParameterKeys.EC_Curve]);
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add("x", priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add("y", priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
-            AddUnprotected("epk", epk);
+            epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add(CoseKeyParameterKeys.EC_Y, priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
+            AddUnprotected(HeaderKeys.EphemeralKey, epk);
         }
 
         private byte[] ECDH_GenerateSecret(Key key)
         {
             Key epk;
 
-            if (key.AsString("kty") != "EC") throw new CoseException("Not an EC Key");
+            if ((key[CoseKeyKeys.KeyType].Type != CBORType.Number) &&
+                (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC)) throw new CoseException("Not an EC Key");
 
             if (m_senderKey != null) {
                 epk = m_senderKey;
             }
             else {
-                CBORObject epkT = FindAttribute("epk");
+                CBORObject epkT = FindAttribute(HeaderKeys.EphemeralKey);
                 if (epkT == null) throw new CoseException("No Ephemeral key");
                 epk = new Key(epkT);
             }
 
-            if (epk.AsString("crv") != key.AsString("crv")) throw new CoseException("not a match of curves");
+            if (epk[CoseKeyParameterKeys.EC_Curve] != key[CoseKeyParameterKeys.EC_Curve]) throw new CoseException("not a match of curves");
 
             //  Get the curve
 
-            X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
+            X9ECParameters p =  key.GetCurve();
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
+            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger(CoseKeyParameterKeys.EC_X), epk.AsBigInteger(CoseKeyParameterKeys.EC_Y));
             ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
-            ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
+            ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger(CoseKeyParameterKeys.EC_D), parameters);
 
             IBasicAgreement e1 = new ECDHBasicAgreement();
             e1.Init(priv);
