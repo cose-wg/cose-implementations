@@ -46,12 +46,12 @@ namespace examples
         {
             StreamReader file = File.OpenText(di.FullName);
             string fileText = file.ReadToEnd();
-            JSON control = JSON.Parse(fileText);
+            CBORObject control = CBORObject.FromJSONString(fileText);
             file.Close();
 
             try {
                 if (ProcessJSON(control)) {
-                    fileText = control.Serialize();
+                    fileText = control.ToJSONStringPretty(1);
                     if (!Directory.Exists(di.DirectoryName + "\\new")) Directory.CreateDirectory(di.DirectoryName + "\\new");
                     StreamWriter file2 = File.CreateText(di.DirectoryName + "\\new\\" + di.Name);
                     file2.Write(fileText);
@@ -64,7 +64,7 @@ namespace examples
             }
         }
 
-        static bool ProcessJSON(JSON control)
+        static bool ProcessJSON(CBORObject control)
         {
             bool modified = false;
             StaticPrng prng = new StaticPrng();
@@ -77,11 +77,11 @@ namespace examples
             }
 
             if (control["input"].ContainsKey("rng_stream")) {
-                if (control["input"]["rng_stream"].nodeType == JsonType.text) {
+                if (control["input"]["rng_stream"].Type == CBORType.TextString) {
                     prng.AddSeedMaterial(FromHex(control["input"]["rng_stream"].AsString()));
                 }
-                else if (control["input"]["rng_stream"].nodeType == JsonType.array) {
-                    foreach (var x in control["input"]["rng_stream"].array) {
+                else if (control["input"]["rng_stream"].Type == CBORType.Array) {
+                    foreach (var x in control["input"]["rng_stream"].Values) {
                         prng.AddSeedMaterial(FromHex(x.AsString()));
                     }
                 }
@@ -120,7 +120,7 @@ namespace examples
                                 Console.WriteLine();
 
 
-                                control["output"][outputName].Set(ToHex(result));
+                                control["output"][outputName] = CBORObject.FromObject(ToHex(result));
                                 modified = true;
                             }
                         }
@@ -133,7 +133,7 @@ namespace examples
                                 Console.WriteLine("******************* New and Old do not match!!!");
                                 Console.WriteLine();
 
-                                control["output"][outputName].Set(strThis);
+                                control["output"][outputName] = CBORObject.FromObject(strThis);
                                 modified = true;
                             }
                         }
@@ -148,8 +148,8 @@ namespace examples
                                 Console.WriteLine();
 
 
-                                if (output == Outputs.jose_compact) control["output"][outputName].Set(strThis);
-                                else control["output"][outputName].Set(JSON.Parse(strThis));
+                                if (output == Outputs.jose_compact) control["output"][outputName] = CBORObject.FromObject(strThis);
+                                else control["output"][outputName] = CBORObject.FromJSONString(strThis);
                                 modified = true;
                             }
                         }
@@ -174,7 +174,7 @@ namespace examples
                     }
 
                     if (prng.IsDirty) {
-                        if (control["input"].ContainsKey("rng_stream")) control["input"]["rng_stream"].Set(ToHex(prng.buffer));
+                        if (control["input"].ContainsKey("rng_stream")) control["input"]["rng_stream"] = CBORObject.FromObject(ToHex(prng.buffer));
                         else control["input"].Add("rng_stream", ToHex(prng.buffer));
                         modified = true;
                     }
@@ -193,13 +193,13 @@ namespace examples
             return modified;
         }
 
-        static byte[] ProcessSign(Outputs outputFormat, JSON control)
+        static byte[] ProcessSign(Outputs outputFormat, CBORObject control)
         {
+            CBORObject input = control["input"];
+            CBORObject sign = input["sign"];
+
             if (outputFormat < Outputs.jose) {
                 COSE.SignMessage msg = new COSE.SignMessage();
-
-                JSON input = control["input"];
-                JSON sign = input["sign"];
 
                 msg.ForceArray(true);
 
@@ -209,8 +209,8 @@ namespace examples
                 if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], true);
                 if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], false);
 
-                if ((!sign.ContainsKey("signers")) || (sign["signers"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
-                foreach (JSON recip in sign["signers"].array) {
+                if ((!sign.ContainsKey("signers")) || (sign["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                foreach (CBORObject recip in sign["signers"].Values) {
                     msg.AddSigner(GetSigner(recip));
                 }
 
@@ -220,9 +220,6 @@ namespace examples
             else {
                 JOSE.SignMessage msg = new JOSE.SignMessage();
 
-                JSON input = control["input"];
-                JSON sign = input["sign"];
-
                 if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
 
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
@@ -231,9 +228,9 @@ namespace examples
                 if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], true);
                 if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], false);
 
-                if ((!sign.ContainsKey("signers")) || (sign["signers"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((!sign.ContainsKey("signers")) || (sign["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 if ((sign["signers"].Count > 1) && (outputFormat == Outputs.jose_flatten)) throw new BadOutputException();
-                foreach (JSON recip in sign["signers"].array) {
+                foreach (CBORObject recip in sign["signers"].Values) {
                     msg.AddSigner(GetSignerJOSE(recip));
                 }
 
@@ -242,10 +239,10 @@ namespace examples
             }
         }
 
-        static byte[] ProcessEncrypt(Outputs outputFormat, JSON control)
+        static byte[] ProcessEncrypt(Outputs outputFormat, CBORObject control)
         {
-            JSON input = control["input"];
-            JSON encrypt = input["encrypt"];
+            CBORObject input = control["input"];
+            CBORObject encrypt = input["encrypt"];
 
             if (outputFormat < Outputs.jose) {
                 COSE.EncryptMessage msg = new COSE.EncryptMessage();
@@ -261,8 +258,8 @@ namespace examples
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
 
-                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
-                foreach (JSON recip in encrypt["recipients"].array) {
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                foreach (CBORObject recip in encrypt["recipients"].Values) {
                     msg.AddRecipient(GetRecipient(recip));
                 }
 
@@ -285,10 +282,10 @@ namespace examples
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
 
-                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 if ((encrypt["recipients"].Count > 1) && (outputFormat != Outputs.jose)) throw new BadOutputException();
 
-                foreach (JSON recip in encrypt["recipients"].array) {
+                foreach (CBORObject recip in encrypt["recipients"].Values) {
                     msg.AddRecipient(GetRecipientJOSE(recip));
                 }
 
@@ -298,19 +295,18 @@ namespace examples
             }
         }
 
-        static byte[] ProcessMAC(Outputs outputFormat, JSON control)
+        static byte[] ProcessMAC(Outputs outputFormat, CBORObject control)
         {
+            CBORObject input = control["input"];
+            CBORObject mac = input["mac"];
+
             if (outputFormat < Outputs.jose) {
                 COSE.MACMessage msg = new COSE.MACMessage();
 
                 msg.ForceArray(true);
 
-                JSON input = control["input"];
-
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
                 msg.SetContent(input["plaintext"].AsString());
-
-                JSON mac = input["mac"];
 
                 if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], true);
                 if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], false);
@@ -318,10 +314,10 @@ namespace examples
                 if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
 
-                if ((!mac.ContainsKey("recipients")) || (mac["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
+                if ((!mac.ContainsKey("recipients")) || (mac["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 if ((mac["recipients"].Count > 1) && (outputFormat == Outputs.jose_flatten)) throw new BadOutputException();
 
-                foreach (JSON recip in mac["recipients"].array) {
+                foreach (CBORObject recip in mac["recipients"].Values) {
                     msg.AddRecipient(GetRecipient(recip));
                 }
 
@@ -331,22 +327,19 @@ namespace examples
             else {
                 JOSE.SignMessage msg = new JOSE.SignMessage();
 
-                JSON input = control["input"];
-                JSON sign = input["mac"];
-
                 if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
 
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
                 msg.SetContent(input["plaintext"].AsString());
 
-                if (sign.ContainsKey("protected_jose")) AddAttributes(msg, sign["protected_jose"], true);
-                if (sign.ContainsKey("unprotected_jose")) AddAttributes(msg, sign["unprotected_jose"], false);
+                if (mac.ContainsKey("protected_jose")) AddAttributes(msg, mac["protected_jose"], true);
+                if (mac.ContainsKey("unprotected_jose")) AddAttributes(msg, mac["unprotected_jose"], false);
 
-                if (!sign.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
 
-                if ((!sign.ContainsKey("recipients")) || (sign["recipients"].nodeType != JsonType.array)) throw new Exception("Missing or malformed recipients");
-                foreach (JSON recip in sign["recipients"].array) {
+                if ((!mac.ContainsKey("recipients")) || (mac["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                foreach (CBORObject recip in mac["recipients"].Values) {
                     msg.AddSigner(GetSignerJOSE(recip));
                 }
 
@@ -355,19 +348,19 @@ namespace examples
             }
         }
 
-        static void AddAttributes(COSE.Attributes msg, JSON items, bool fProtected)
+        static void AddAttributes(COSE.Attributes msg, CBORObject items, bool fProtected)
         {
-            foreach (KeyValuePair<string, JSON> attr in items.map) {
-                CBORObject cborKey;
-                CBORObject cborValue;
+            foreach (CBORObject cborKey2 in items.Keys) {
+                CBORObject cborValue = items[cborKey2];
+                CBORObject cborKey = cborKey2;
+                string strKey = cborKey.AsString();
 
-                if ((attr.Key.Length > 4) && (attr.Key.Substring(attr.Key.Length - 4, 4) == "_hex")) {
-                    cborKey = CBORObject.FromObject(attr.Key.Substring(0, attr.Key.Length - 4));
-                    cborValue = CBORObject.FromObject( FromHex(attr.Value.AsString()));
+                if ((strKey.Length > 4) && (strKey.Substring(strKey.Length - 4, 4) == "_hex")) {
+                    cborKey = CBORObject.FromObject(strKey.Substring(0, strKey.Length - 4));
+                    cborValue = CBORObject.FromObject( FromHex(cborValue.AsString()));
                 }
-                else cborValue = AsCbor(attr.Value);
 
-                switch (attr.Key) {
+                switch (cborKey.AsString()) {
                 case "alg":
                     cborKey = COSE.HeaderKeys.Algorithm;
                     cborValue = AlgorithmMap(cborValue);
@@ -377,25 +370,28 @@ namespace examples
                     cborKey = COSE.HeaderKeys.KeyId;
                     break;
 
+                case"epk":
+                    cborKey = COSE.HeaderKeys.EphemeralKey;
+                    break;
+
                 default:
-                    cborKey = CBORObject.FromObject(attr.Key);
                     break;
                 }
                 msg.AddAttribute(cborKey, cborValue, fProtected);
             }
         }
 
-        static void AddAttributes(JOSE.Attributes msg, JSON items, bool fProtected)
+        static void AddAttributes(JOSE.Attributes msg, CBORObject items, bool fProtected)
         {
-            foreach (KeyValuePair<string, JSON> key in items.map) {
-                if ((key.Key.Length > 4) && (key.Key.Substring(key.Key.Length - 4, 4) == "_hex")) {
-                    msg.AddAttribute(key.Key.Substring(0, key.Key.Length - 4), JOSE.Message.base64urlencode(FromHex(key.Value.AsString())), fProtected);
+            foreach (CBORObject key in items.Keys) {
+                if ((key.AsString().Length > 4) && (key.AsString().Substring(key.AsString().Length - 4, 4) == "_hex")) {
+                    msg.AddAttribute(key.AsString().Substring(0, key.AsString().Length - 4), JOSE.Message.base64urlencode(FromHex(items[key].AsString())), fProtected);
                 }
-                else msg.AddAttribute(key.Key, key.Value, fProtected);
+                else msg.AddAttribute(key.AsString(), items[key].AsString(), fProtected);
             }
         }
 
-        static COSE.Recipient GetRecipient(JSON control)
+        static COSE.Recipient GetRecipient(CBORObject control)
         {
             if (!control.ContainsKey("alg")) throw new Exception("Recipient missing alg field");
 
@@ -416,14 +412,14 @@ namespace examples
             return recipient;
         }
 
-        static JOSE.Recipient GetRecipientJOSE(JSON control)
+        static JOSE.Recipient GetRecipientJOSE(CBORObject control)
         {
             JOSE.Key key;
 
             if (!control.ContainsKey("alg")) throw new Exception("Recipient missing alg field");
 
             if (control.ContainsKey("key")) {
-                key = new JOSE.Key(control["key"]);
+                key = new JOSE.Key(JSON.Parse(control["key"].ToJSONString()));
             }
             else if (control.ContainsKey("pwd")) {
                 key = new JOSE.Key();
@@ -443,19 +439,19 @@ namespace examples
             if (control.ContainsKey("unprotected_jose")) AddAttributes(recipient, control["unprotected_jose"], false);
 
             if (control.ContainsKey("sender_key")) {
-                JOSE.Key myKey = new JOSE.Key(control["sender_key"]);
+                JOSE.Key myKey = new JOSE.Key(JSON.Parse(control["sender_key"].ToJSONString()));
                 recipient.SetSenderKey(myKey);
             }
             return recipient;
         }
 
-        static COSE.Signer GetSigner(JSON control)
+        static COSE.Signer GetSigner(CBORObject control)
         {
             if (!control.ContainsKey("alg")) throw new Exception("Signer missing alg field");
 
             COSE.Key key = GetKey(control["key"]);
 
-            COSE.Signer signer = new COSE.Signer(key, control["alg"].AsString());
+            COSE.Signer signer = new COSE.Signer(key, control["alg"]);
 
             if (control.ContainsKey("protected")) AddAttributes(signer, control["protected"], true);
             if (control.ContainsKey("unprotected")) AddAttributes(signer, control["unprotected"], false);
@@ -463,11 +459,11 @@ namespace examples
             return signer;
         }
 
-        static JOSE.Signer GetSignerJOSE(JSON control)
+        static JOSE.Signer GetSignerJOSE(CBORObject control)
         {
             if (!control.ContainsKey("alg")) throw new Exception("Signer missing alg field");
 
-            JOSE.Key key = new JOSE.Key(control["key"]);
+            JOSE.Key key = new JOSE.Key(JSON.Parse(control["key"].ToJSONString()));
 
             JOSE.Signer signer = new JOSE.Signer(key, control["alg"].AsString());
 
@@ -477,37 +473,85 @@ namespace examples
             return signer;
         }
 
-        static COSE.Key GetKey(JSON control)
+        static COSE.Key GetKey(CBORObject control)
         {
             COSE.Key key = new COSE.Key();
+            CBORObject newKey;
+            CBORObject newValue;
 
-            foreach (KeyValuePair<string, JSON> pair in control.map) {
-                switch (pair.Key) {
+            foreach (CBORObject item in control.Keys) { 
+                switch (item.AsString()) {
                 case "kty":
-                case "kid":
-                case "use":
-                case "enc":
-                case "crv":
-                case "alg":
-                    key.Add(pair.Key, pair.Value.AsString());
+                    newKey = COSE.CoseKeyKeys.KeyType;
+                    switch (control[item].AsString()) {
+                    case "EC": newValue = COSE.GeneralValues.KeyType_EC; goto NewValue;
+                    case "RSA": newValue = COSE.GeneralValues.KeyType_RSA; goto NewValue;
+                    case "oct": newValue = COSE.GeneralValues.KeyType_Octet; goto NewValue;
+                    default:
+                        break;
+                    }
+                TextValue:
+                    key.Add(newKey, control[item]);
                     break;
 
-                case "x":
-                case "y":
-                case "d":
+                case "kid":
+                    newKey = COSE.CoseKeyKeys.KeyIdentifier;
+                    newValue = CBORObject.FromObject(UTF8Encoding.UTF8.GetBytes(control[item].AsString()));
+                    goto NewValue;
+
+                case "kid_hex":
+                    newKey = COSE.CoseKeyKeys.KeyIdentifier;
+                BinaryValue:
+                    key.Add(newKey, CBORObject.FromObject(base64urldecode(control[item].AsString())));
+                    break;
+
+                case "alg":
+                    newKey = COSE.CoseKeyKeys.Algorithm;
+                    goto TextValue;
+
+                    // ECDSA parameters
+                case "crv":
+                    newKey = COSE.CoseKeyParameterKeys.EC_Curve;
+                    switch (control[item].AsString()) {
+                    case "P-256":
+                        newValue = COSE.GeneralValues.P256;
+                        break;
+
+                    case "P-521":
+                        newValue = COSE.GeneralValues.P521;
+                        break;
+
+                    default:
+                        newValue = control[item];
+                        break;
+                    }
+                NewValue:
+                    key.Add(newKey, newValue);
+                    break;
+
+                case "use":
+                case "enc":
+                    key.Add(item, control[item]);
+                    break;
+
+                case "x": newKey = COSE.CoseKeyParameterKeys.EC_X; goto BinaryValue;
+                case "y": newKey = COSE.CoseKeyParameterKeys.EC_Y; goto BinaryValue;
+
+                case "e": newKey = COSE.CoseKeyParameterKeys.RSA_e; goto BinaryValue;
+                case "n": newKey = COSE.CoseKeyParameterKeys.RSA_n; goto BinaryValue;
+
+                case "d": newKey = COSE.CoseKeyParameterKeys.EC_D; goto BinaryValue;
                 case "k":
-                case "e":
-                case "n":
                 case "p":
                 case "q":
                 case "dp":
                 case "dq":
                 case "qi":
-                    key.Add(pair.Key, base64urldecode(pair.Value.AsString()));
-                    break;
+                    newKey = item;
+                    goto BinaryValue;
 
                 default:
-                    throw new Exception("Unrecognized field name " + pair.Key + " in key object");
+                    throw new Exception("Unrecognized field name " + item.AsString() + " in key object");
                 }
             }
             return key;
@@ -592,6 +636,8 @@ namespace examples
             case "HS512": return COSE.AlgorithmValues.HMAC_SHA_512;
             case "ES256": return COSE.AlgorithmValues.ECDSA_256;
             case "ES512": return COSE.AlgorithmValues.ECDSA_512;
+            case "PS256": return COSE.AlgorithmValues.RSA_PSS_256;
+            case "PS512": return COSE.AlgorithmValues.RSA_PSS_512;
                 
             default: return old;
             }

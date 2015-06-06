@@ -21,8 +21,6 @@ namespace COSE
 {
     public class SignMessage : Message
     {
-        CBORObject obj;
-
          List<Signer> signerList = new List<Signer>();
          byte[] rgbContent;
 
@@ -81,7 +79,7 @@ namespace COSE
 
 #else
             obj = CBORObject.NewMap();
-            obj.Add(RecordKeys.MsgType, 3);  // Tag as an MAC item
+            obj.Add(RecordKeys.MsgType, 1);  // Tag as an Signed item
 #endif
 
             obj3 = Encode();
@@ -171,10 +169,10 @@ namespace COSE
     {
         Key keyToSign;
 
-                public Signer(Key key, string algorithm = null)
+        public Signer(Key key, CBORObject algorithm = null)
         {
-            if (algorithm != null) AddUnprotected("alg", algorithm);
-            if (key.ContainsName("kid")) AddUnprotected("kid", key.AsObject("kid"));
+            if (algorithm != null) AddAttribute(HeaderKeys.Algorithm, algorithm, false);
+            if (key.ContainsName(CoseKeyKeys.KeyIdentifier)) AddUnprotected(HeaderKeys.KeyId, key[CoseKeyKeys.KeyIdentifier]);
 
             if (key.ContainsName("use")) {
                     string usage = key.AsString("use");
@@ -221,9 +219,9 @@ namespace COSE
 
             obj.Add(Sign(signObj.EncodeToBytes()));
 #else
-                        CBORObject obj = CBORObject.NewMap();
+            CBORObject obj = CBORObject.NewMap();
 
-                        CBORObject cborProtected = CBORObject.Null;
+            CBORObject cborProtected = CBORObject.Null;
             if ((objProtected != null) && (objProtected.Count > 0)) {
                 byte[] rgb = objProtected.EncodeToBytes();
                 obj.Add(RecordKeys.Protected, rgb);
@@ -248,33 +246,48 @@ namespace COSE
                 alg = FindAttribute(HeaderKeys.Algorithm);
 
             if (alg == null) {
-                switch (keyToSign.AsString("kty")) {
-                case "RSA":
-                    alg = CBORObject.FromObject("PS256");
-                    break;
-
-                case "EC":
-                    switch (keyToSign.AsString("crv")) {
-                    case "P-256":
-                        alg = AlgorithmValues.ECDSA_256;
+                if (keyToSign[CoseKeyKeys.KeyType].Type == CBORType.Number) {
+                    switch ((GeneralValuesInt) keyToSign[CoseKeyKeys.KeyType].AsInt32()) {
+                    case GeneralValuesInt.KeyType_RSA:
+                        alg = CBORObject.FromObject("PS256");
                         break;
 
-                    case "P-384":
-                        alg = CBORObject.FromObject("ES384");
-                        break;
+                    case GeneralValuesInt.KeyType_EC:
+                        if (keyToSign[CoseKeyParameterKeys.EC_Curve].Type == CBORType.Number) {
+                            switch ((GeneralValuesInt) keyToSign[CoseKeyParameterKeys.EC_Curve].AsInt32()) {
+                            case GeneralValuesInt.P256:
+                                alg = AlgorithmValues.ECDSA_256;
+                                break;
 
-                    case "P-521":
-                        alg = AlgorithmValues.ECDSA_512;
+                            case GeneralValuesInt.P521:
+                                alg = AlgorithmValues.ECDSA_512;
+                                break;
+
+                            default:
+                                throw new CoseException("Unknown curve");
+                            }
+                        }
+                        else if (keyToSign[CoseKeyParameterKeys.EC_Curve].Type == CBORType.TextString) {
+                            switch (keyToSign[CoseKeyParameterKeys.EC_Curve].AsString()) {
+                            case "P-384":
+                                alg = CBORObject.FromObject("ES384");
+                                break;
+
+                            default:
+                                throw new CoseException("Unknown curve");
+                            }
+                        }
+                        else throw new CoseException("Curve is incorrectly encoded");
                         break;
 
                     default:
-                        throw new Exception("Unknown curve");
+                        throw new Exception("Unknown or unsupported key type " + keyToSign.AsString("kty"));
                     }
-                    break;
-
-                default:
-                    throw new Exception("Unknown or unsupported key type " + keyToSign.AsString("kty"));
                 }
+                else if (keyToSign[CoseKeyKeys.KeyType].Type == CBORType.TextString) {
+                    throw new CoseException("Unknown or unsupported key type " + keyToSign[CoseKeyKeys.KeyType].AsString());
+                }
+                else throw new CoseException("Key type is not correctly encoded");
                 objUnprotected.Add(HeaderKeys.Algorithm, alg);
             }
 
@@ -319,7 +332,7 @@ namespace COSE
 {
                         PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
 
-                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(ConvertBigNum(keyToSign.AsObject("n")), ConvertBigNum(keyToSign.AsObject("e")), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
 
                         signer.Init(true, prv);
                         signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
@@ -330,9 +343,9 @@ namespace COSE
                  {
                         SecureRandom random = new SecureRandom();
 
-                        X9ECParameters p = NistNamedCurves.GetByName(keyToSign.AsString("crv"));
+                        X9ECParameters p = keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign.AsObject("d")), parameters);
+                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
                         ParametersWithRandom param = new ParametersWithRandom(privKey, random);
 
                         ECDsaSigner ecdsa = new ECDsaSigner();
@@ -356,7 +369,7 @@ namespace COSE
                     {
                         PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
 
-                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(ConvertBigNum(keyToSign.AsObject("n")), ConvertBigNum(keyToSign.AsObject("e")), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
 
                         signer.Init(true, prv);
                         signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
@@ -368,9 +381,9 @@ namespace COSE
                     {
                         SecureRandom random = new SecureRandom();
 
-                        X9ECParameters p = NistNamedCurves.GetByName(keyToSign.AsString("crv"));
+                        X9ECParameters p =  keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign.AsObject("d")), parameters);
+                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
                         ParametersWithRandom param = new ParametersWithRandom(privKey, random);
 
                         ECDsaSigner ecdsa = new ECDsaSigner();

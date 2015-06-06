@@ -1202,8 +1202,8 @@ namespace JOSE
             epk.Add("kty", "EC");
             epk.Add("crv", m_key.AsString("crv"));
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add("x", priv.Q.X.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add("y", priv.Q.Y.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add("x", priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add("y", priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
 
             if (msg.FindAttribute("epk", true) != null) msg.AddAttribute("epk", epk, true);
             else if (msg.FindAttribute("epk", false) != null) msg.AddAttribute("epk", epk, false);

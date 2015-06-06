@@ -72,6 +72,46 @@ namespace COSE
         static public readonly CBORObject RSA_PSS_512 = CBORObject.FromObject(AlgorithmValuesInt.RSA_PSS_512);
     }
 
+    public class CoseKeyKeys
+    {
+        static public readonly CBORObject KeyType = CBORObject.FromObject(1);
+        static public readonly CBORObject KeyIdentifier = CBORObject.FromObject(2);
+        static public readonly CBORObject Algorithm = CBORObject.FromObject(3);
+        static public readonly CBORObject Key_Operations = CBORObject.FromObject("key_ops");
+        static public readonly CBORObject x5u = CBORObject.FromObject("x5u");
+        static public readonly CBORObject x5c = CBORObject.FromObject("x5c");
+        static public readonly CBORObject x5t = CBORObject.FromObject("x5t");
+        static public readonly CBORObject x5t_sha_256 = CBORObject.FromObject("x5t#S256");
+    }
+
+    public class CoseKeyParameterKeys
+    {
+        static public readonly CBORObject EC_Curve = CBORObject.FromObject(-1);
+        static public readonly CBORObject EC_X = CBORObject.FromObject(-2);
+        static public readonly CBORObject EC_Y = CBORObject.FromObject(-3);
+        static public readonly CBORObject EC_D = CBORObject.FromObject("d");
+
+        static public readonly CBORObject RSA_e = CBORObject.FromObject(-1);
+        static public readonly CBORObject RSA_n = CBORObject.FromObject(-2);
+    }
+
+    public enum GeneralValuesInt
+    {
+        KeyType_EC = 1, KeyType_RSA=2, KeyType_Octet = 3,
+        P256=4, P521=5,
+
+    }
+
+    public class GeneralValues
+    {
+        static public readonly CBORObject KeyType_EC = CBORObject.FromObject(GeneralValuesInt.KeyType_EC);
+        static public readonly CBORObject KeyType_RSA = CBORObject.FromObject(GeneralValuesInt.KeyType_RSA);
+        static public readonly CBORObject KeyType_Octet = CBORObject.FromObject(GeneralValuesInt.KeyType_Octet);
+        static public readonly CBORObject P256 = CBORObject.FromObject(GeneralValuesInt.P256);
+        static public readonly CBORObject P521 = CBORObject.FromObject(GeneralValuesInt.P521);
+
+    }
+
     public abstract class Message : Attributes
     {
         protected bool m_forceArray = false;
