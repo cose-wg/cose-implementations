@@ -16,7 +16,7 @@ namespace examples
     {
         enum Outputs { cbor = 1, cborDiag = 2, jose = 3, jose_compact = 4, jose_flatten = 5 };
 
-        static Outputs[] RgOutputs = new Outputs[] { Outputs.cborDiag  /*, Outputs.cbor, Outputs.cborFlatten*/ };
+        static Outputs[] RgOutputs = new Outputs[] { Outputs.cborDiag, Outputs.cbor  /*, Outputs.cbor, Outputs.cborFlatten*/ };
 
         static void Main(string[] args)
         {
@@ -49,10 +49,11 @@ namespace examples
             CBORObject control = CBORObject.FromJSONString(fileText);
             file.Close();
 
+            if (!Directory.Exists(di.DirectoryName + "\\new")) Directory.CreateDirectory(di.DirectoryName + "\\new");
+
             try {
-                if (ProcessJSON(control)) {
+                if (ProcessJSON(control, di.DirectoryName + "\\new\\" + di.Name + ".bin")) {
                     fileText = control.ToJSONStringPretty(1);
-                    if (!Directory.Exists(di.DirectoryName + "\\new")) Directory.CreateDirectory(di.DirectoryName + "\\new");
                     StreamWriter file2 = File.CreateText(di.DirectoryName + "\\new\\" + di.Name);
                     file2.Write(fileText);
                     file2.Write("\r\n");
@@ -64,7 +65,7 @@ namespace examples
             }
         }
 
-        static bool ProcessJSON(CBORObject control)
+        static bool ProcessJSON(CBORObject control, string fileName)
         {
             bool modified = false;
             StaticPrng prng = new StaticPrng();
@@ -110,9 +111,9 @@ namespace examples
                     else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
                     else throw new Exception("Unknown operation in control");
 
-                    if (control["output"].ContainsKey(outputName)) {
-                        if (output == Outputs.cbor) {
- 
+                    switch (output) {
+                    case Outputs.cbor:
+                        if (control["output"].ContainsKey(outputName)) {
                             byte[] rgbSource = FromHex(control["output"][outputName].AsString());
                             if (!rgbSource.SequenceEqual(result)) {
                                 Console.WriteLine();
@@ -124,7 +125,17 @@ namespace examples
                                 modified = true;
                             }
                         }
-                        else if (output == Outputs.cborDiag) {
+                        else {
+                            control["output"].Add(outputName, ToHex(result));
+                            modified = true;
+                        }
+                        FileStream bw = File.OpenWrite(fileName);
+                        bw.Write(result, 0, result.Length);
+                        bw.Close();
+                        break;
+
+                    case Outputs.cborDiag:
+                        if (control["output"].ContainsKey(outputName)) {
                             string strSource = control["output"][outputName].ToString();
                             string strThis = UTF8Encoding.UTF8.GetString(result);
 
@@ -137,8 +148,14 @@ namespace examples
                                 modified = true;
                             }
                         }
- 
                         else {
+                            control["output"].Add(outputName, UTF8Encoding.UTF8.GetString(result));
+                            modified = true;
+                        }
+                        break;
+
+                    default:
+                        if (control["output"].ContainsKey(outputName)) {
                             string strSource = control["output"][outputName].ToString();
                             string strThis = UTF8Encoding.UTF8.GetString(result);
 
@@ -153,24 +170,17 @@ namespace examples
                                 modified = true;
                             }
                         }
-                    }
-                    else {
-                        switch (output) {
-                        case Outputs.cbor:
-                        case Outputs.jose_compact:
-                            control["output"].Add(outputName, ToHex(result));
-                            break;
+                        else {
+                            if ((output == Outputs.jose) || (output == Outputs.jose_flatten)) {
+                                control["output"].Add(outputName, JSON.Parse(UTF8Encoding.UTF8.GetString(result)));
 
-                        case Outputs.cborDiag:
-                            control["output"].Add(outputName, UTF8Encoding.UTF8.GetString(result));
-                            break;
-
-                        case Outputs.jose:
-                        case Outputs.jose_flatten:
-                            control["output"].Add(outputName, JSON.Parse(UTF8Encoding.UTF8.GetString(result)));
-                            break;
+                            }
+                            else {
+                                control["output"].Add(outputName, ToHex(result));
+                            }
                         }
                         modified = true;
+                        break;
                     }
 
                     if (prng.IsDirty) {
@@ -395,7 +405,9 @@ namespace examples
         {
             if (!control.ContainsKey("alg")) throw new Exception("Recipient missing alg field");
 
-            COSE.Key key = GetKey(control["key"]);
+            COSE.Key key = null;
+            
+            if (control["key"] != null) key = GetKey(control["key"]);
 
             CBORObject alg = AlgorithmMap(CBORObject.FromObject(control["alg"].AsString()));
             COSE.Recipient recipient = new COSE.Recipient(key, alg);
@@ -404,6 +416,13 @@ namespace examples
 
             if (control.ContainsKey("protected")) AddAttributes(recipient, control["protected"], true);
             if (control.ContainsKey("unprotected")) AddAttributes(recipient, control["unprotected"], false);
+
+            if (control.ContainsKey("recipients")) {
+                if ((!control.ContainsKey("recipients")) || (control["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                foreach (CBORObject recip in control["recipients"].Values) {
+                    recipient.AddRecipient(GetRecipient(recip));
+                }
+            }
 
             if (control.ContainsKey("sender_key")) {
                 COSE.Key myKey = GetKey(control["sender_key"]);

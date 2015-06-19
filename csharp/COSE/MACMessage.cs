@@ -25,7 +25,7 @@ namespace COSE
     {
         byte[] rgbTag;
         byte[] rgbContent;
-
+        byte[] external_aad = null;
 
         List<Recipient> recipientList = new List<Recipient>();
 
@@ -131,6 +131,11 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
+        public void SetExternalAAD(byte[] bytes)
+        {
+            external_aad = bytes;
+        }
+
         protected virtual void MAC()
         {
             CBORObject alg;
@@ -205,7 +210,9 @@ namespace COSE
             CBORObject obj = CBORObject.NewArray();
 
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
-            else obj.Add(null);
+            else obj.Add(CBORObject.FromObject(new byte[0]));
+            if (external_aad != null) obj.Add(CBORObject.FromObject(external_aad));
+            else obj.Add(CBORObject.FromObject(new byte[0]));
             obj.Add(rgbContent);
 
             return obj.EncodeToBytes();

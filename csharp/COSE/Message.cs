@@ -18,8 +18,6 @@ namespace COSE
         static public readonly CBORObject Payload = CBORObject.FromObject(4);
         static public readonly CBORObject Signatures = CBORObject.FromObject(5);
         static public readonly CBORObject Signature = CBORObject.FromObject(6);
-        static public readonly CBORObject IV = CBORObject.FromObject(7);
-        static public readonly CBORObject AAD = CBORObject.FromObject(8);
         static public readonly CBORObject CipherText = CBORObject.FromObject(4);
         static public readonly CBORObject Recipients = CBORObject.FromObject(9);
         static public readonly CBORObject Tag = CBORObject.FromObject(10);
@@ -93,6 +91,8 @@ namespace COSE
 
         static public readonly CBORObject RSA_e = CBORObject.FromObject(-1);
         static public readonly CBORObject RSA_n = CBORObject.FromObject(-2);
+
+        static public readonly CBORObject IV = CBORObject.FromObject(-1);
     }
 
     public enum GeneralValuesInt
@@ -114,7 +114,7 @@ namespace COSE
 
     public abstract class Message : Attributes
     {
-        protected bool m_forceArray = false;
+        protected bool m_forceArray = true;
 
         protected static SecureRandom s_PRNG = null;
 
@@ -204,13 +204,6 @@ namespace COSE
             if (objProtected.ContainsKey(name)) objProtected.Remove(name);
             if (objUnprotected.ContainsKey(name)) objUnprotected[name] = value;
             else objUnprotected.Add(name, value);
-        }
-
-        public byte[] EncodeProtected()
-        {
-            byte[] A = new byte[0];
-            if (objProtected != null) A = objProtected.EncodeToBytes();
-            return A;
         }
 
         public CBORObject FindAttribute(CBORObject name)
