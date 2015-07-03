@@ -54,6 +54,9 @@ namespace COSE
         static public readonly CBORObject HMAC_SHA_384 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_384);
         static public readonly CBORObject HMAC_SHA_512 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_512);
 
+        static public readonly CBORObject AES_CMAC_128_64 = CBORObject.FromObject("AES-CMAC-128/64");
+        static public readonly CBORObject AES_CMAC_256_64 = CBORObject.FromObject("AES-CMAC-256/64");
+
         static public readonly CBORObject RSA_OAEP = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP);
         static public readonly CBORObject RSA_OAEP_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP_256);
 
@@ -93,6 +96,17 @@ namespace COSE
         static public readonly CBORObject RSA_n = CBORObject.FromObject(-2);
 
         static public readonly CBORObject IV = CBORObject.FromObject(-1);
+
+        static public readonly CBORObject HKDF_Salt = CBORObject.FromObject(-10);
+        static public readonly CBORObject HKDF_Context_PartyU_ID = CBORObject.FromObject(-20);
+        static public readonly CBORObject HKDF_Context_PartyU_nonce = CBORObject.FromObject(-21);
+        static public readonly CBORObject HKDF_Context_PartyU_Other = CBORObject.FromObject(-22);
+        static public readonly CBORObject HKDF_Context_PartyV_ID = CBORObject.FromObject(-23);
+        static public readonly CBORObject HKDF_Context_PartyV_nonce = CBORObject.FromObject(-24);
+        static public readonly CBORObject HKDF_Context_PartyV_Other = CBORObject.FromObject(-25);
+        static public readonly CBORObject HKDF_SuppPub_Other = CBORObject.FromObject("HKDF Supp Public");
+        static public readonly CBORObject HKDF_SuppPriv_Other = CBORObject.FromObject("HKDF Supp Private");
+
     }
 
     public enum GeneralValuesInt
@@ -153,6 +167,7 @@ namespace COSE
     {
         protected CBORObject objProtected = CBORObject.NewMap();
         protected CBORObject objUnprotected = CBORObject.NewMap();
+        protected CBORObject objDontSend = CBORObject.NewMap();
 
         public void AddAttribute(string name, string value, bool fProtected)
         {
@@ -172,57 +187,67 @@ namespace COSE
             else AddUnprotected(key, value);
         }
 
-        public void AddProtected(string name, string value)
+        public void AddProtected(string label, string value)
         {
-            AddProtected(name, CBORObject.FromObject(value)); 
+            AddProtected(label, CBORObject.FromObject(value)); 
         }
 
-        public void AddProtected(string name, CBORObject value)
+        public void AddProtected(string label, CBORObject value)
         {
-            AddProtected(CBORObject.FromObject(name), value);
+            AddProtected(CBORObject.FromObject(label), value);
         }
 
-        public void AddUnprotected(string name, string value)
+        public void AddUnprotected(string label, string value)
         {
-            AddUnprotected(name, CBORObject.FromObject(value));
+            AddUnprotected(label, CBORObject.FromObject(label));
         }
 
-        public void AddUnprotected(string name, CBORObject value)
+        public void AddUnprotected(string label, CBORObject value)
         {
-            AddUnprotected(CBORObject.FromObject(name), value);
+            AddUnprotected(CBORObject.FromObject(label), value);
         }
 
-        public void AddProtected(CBORObject name, CBORObject value)
+        public void AddProtected(CBORObject label, CBORObject value)
         {
-            if (objUnprotected.ContainsKey(name)) objUnprotected.Remove(name);
-            if (objProtected.ContainsKey(name)) objProtected[name] = value;
-            else objProtected.Add(name, value);
+            RemoveAttribute(label);
+            objProtected.Add(label, value);
         }
 
-        public void AddUnprotected(CBORObject name, CBORObject value)
+        public void AddUnprotected(CBORObject label, CBORObject value)
         {
-            if (objProtected.ContainsKey(name)) objProtected.Remove(name);
-            if (objUnprotected.ContainsKey(name)) objUnprotected[name] = value;
-            else objUnprotected.Add(name, value);
+            RemoveAttribute(label);
+            objUnprotected.Add(label, value);
         }
 
-        public CBORObject FindAttribute(CBORObject name)
+        public void AddDontSend(CBORObject label, CBORObject value)
         {
-            if (objProtected.ContainsKey(name)) return objProtected[name];
-            if (objUnprotected.ContainsKey(name)) return objUnprotected[name];
+            RemoveAttribute(label);
+            objDontSend.Add(label, value);
+        }
+
+        public CBORObject FindAttribute(CBORObject label)
+        {
+            if (objProtected.ContainsKey(label)) return objProtected[label];
+            if (objUnprotected.ContainsKey(label)) return objUnprotected[label];
+            if (objDontSend.ContainsKey(label)) return objDontSend[label];
             return null;
         }
 
-        public CBORObject FindAttribute(int name)
+        public CBORObject FindAttribute(int label)
         {
-            return FindAttribute(CBORObject.FromObject(name));
+            return FindAttribute(CBORObject.FromObject(label));
         }
 
-        public CBORObject FindAttribute(string name)
+        public CBORObject FindAttribute(string label)
         {
-            if (objProtected.ContainsKey(name)) return objProtected[name];
-            if (objUnprotected.ContainsKey(name)) return objUnprotected[name];
-            return null;
+            return FindAttribute(CBORObject.FromObject(label));
+        }
+
+        private void RemoveAttribute(CBORObject label)
+        {
+            if (objProtected.ContainsKey(label)) objProtected.Remove(label);
+            if (objUnprotected.ContainsKey(label)) objUnprotected.Remove(label);
+            if (objDontSend.ContainsKey(label)) objDontSend.Remove(label);
         }
     }
 

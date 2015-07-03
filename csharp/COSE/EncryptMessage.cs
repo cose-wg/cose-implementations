@@ -608,6 +608,11 @@ namespace COSE
                         m_recipientType = RecipientType.keyWrap;
                         break;
 
+                    case AlgorithmValuesInt.DIRECT:  // Direct encryption mode
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid parameters");
+                        m_recipientType = RecipientType.direct;
+                        break;
+
                     default:
                         throw new CoseException("Unrecognized recipient algorithm");
                     }
@@ -801,7 +806,7 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "dir":
+                // case "dir":
                 case "ECDH-ES":
                 case "ECDH-SS":
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
@@ -895,6 +900,12 @@ namespace COSE
             }
             else if (alg.Type == CBORType.Number) {
                 switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.DIRECT:
+                // case "ECDH-ES":
+                // case "ECDH-SS":
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
+                    break;
+
                 case AlgorithmValuesInt.RSA_OAEP:
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     RSA_OAEP_KeyWrap(new Sha1Digest()); 
@@ -933,7 +944,12 @@ namespace COSE
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
                 case "AES-128-CCM-64":
+                case "AES-CMAC-128/64":
                     cbitKey = 128;
+                    break;
+
+                case "AES-CMAC-256/64":
+                    cbitKey = 256;
                     break;
 
                 case "HS384":
@@ -972,37 +988,46 @@ namespace COSE
             }
             else throw new CoseException("Algorithm incorrectly encoded");
 
-            string algKeyManagement = FindAttribute(HeaderKeys.Algorithm).AsString();
+            CBORObject keyManagement = FindAttribute(HeaderKeys.Algorithm);
+            if (keyManagement.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) keyManagement.AsInt32()) {
+                case AlgorithmValuesInt.DIRECT:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Key and key managment algorithm don't match");
+                    byte[] rgb = m_key.AsBytes("k");
+                    if (rgb.Length * 8 != cbitKey) throw new CoseException("Incorrect key size");
+                    return rgb;
 
-            switch (algKeyManagement) {
-            case "dir":
-                if (m_key[CoseKeyKeys.KeyType]  != GeneralValues.KeyType_Octet) throw new CoseException("Key and key managment algorithm don't match");
-                byte[] rgb =  m_key.AsBytes("k");
-                if (rgb.Length * 8 != cbitKey) throw new CoseException("Incorrect key size");
-                return rgb;
-
-            case "ECDH-ES":
-                {
-                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
-
-                    ECDH_GenerateEphemeral();
-
-                    byte[] rgbSecret = ECDH_GenerateSecret(m_key);
-
-                    return KDF(rgbSecret, cbitKey, alg);
+                default:
+                    throw new CoseException("Unknown algorithm");
                 }
+            }
+            else if (keyManagement.Type == CBORType.TextString) {
+                switch (keyManagement.AsString()) {
+                case "ECDH-ES": {
+                        if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
 
-            case "ECDH-SS": {
-                if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
-                    if (FindAttribute("apu") == null) {
-                        byte[] rgbAPU = new byte[512 / 8];
-                        s_PRNG.NextBytes(rgbAPU);
-                        AddUnprotected("apu", CBORObject.FromObject(rgbAPU));
+                        ECDH_GenerateEphemeral();
+
+                        byte[] rgbSecret = ECDH_GenerateSecret(m_key);
+
+                        return KDF(rgbSecret, cbitKey, alg);
                     }
-                    byte[] rgbSecret = ECDH_GenerateSecret(m_key);
-                    return KDF(rgbSecret, cbitKey, alg);
-                }
 
+                case "ECDH-SS": {
+                        if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
+                        if (FindAttribute("apu") == null) {
+                            byte[] rgbAPU = new byte[512 / 8];
+                            s_PRNG.NextBytes(rgbAPU);
+                            AddUnprotected("apu", CBORObject.FromObject(rgbAPU));
+                        }
+                        byte[] rgbSecret = ECDH_GenerateSecret(m_key);
+                        return KDF(rgbSecret, cbitKey, alg);
+                    }
+
+                default:
+                    throw new CoseException("Unknown algorithm");
+
+                }
             }
          
             throw new CoseException("NYI");
@@ -1202,6 +1227,96 @@ namespace COSE
 
             return k1.ToByteArrayUnsigned();
         }
+
+
+        private byte[] HKDF(byte[] secret, int cbitKey, CBORObject algorithmID, IDigest digest)
+        {
+            CBORObject obj;
+
+            //  Build the context structure
+            CBORObject contextArray = CBORObject.NewArray();
+
+            //  First element is - algorithm ID
+            contextArray.Add(algorithmID);
+
+            //  Second element is - Party U info
+            CBORObject info = CBORObject.NewArray();
+            contextArray.Add(info);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_ID);
+            if (obj != null) info.Add(obj);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce);
+            if (obj != null) info.Add(obj);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_Other);
+            if (obj != null) info.Add(obj);
+
+            //  third element is - Party V info
+            info = CBORObject.NewArray();
+            contextArray.Add(info);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_ID);
+            if (obj != null) info.Add(obj);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_nonce);
+            if (obj != null) info.Add(obj);
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_Other);
+            if (obj != null) info.Add(obj);
+
+            //  fourth element is - Supplimental Public Info
+            info = CBORObject.NewArray();
+            contextArray.Add(info);
+            info.Add(CBORObject.FromObject(cbitKey));
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPub_Other);
+            if (obj != null) info.Add(obj);
+
+            //  Fifth element is - Supplimental Private Info
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPriv_Other);
+            if (obj != null) contextArray.Add(obj);
+
+            byte[] rgbContext = obj.EncodeToBytes();
+
+            //  See if we have salt
+            obj = FindAttribute(CoseKeyParameterKeys.HKDF_Salt);
+
+            //  Now start doing HKDF
+            //  Perform the Extract phase
+            HMac mac = new HMac(digest);
+
+            int hashLength = digest.GetByteLength();
+            int c = ((cbitKey + 7)/8 + hashLength-1)/hashLength;
+
+            byte[] K = new byte[0];
+            if (obj != null) K = obj.GetByteString();
+            KeyParameter key = new KeyParameter(K);
+            mac.Init(key);
+            mac.BlockUpdate(secret, 0, secret.Length);
+
+            byte[] rgbExtract = new byte[mac.GetUnderlyingDigest().GetByteLength()];
+            mac.DoFinal(rgbExtract, 0);
+
+
+            //  Now do the Expand Phase
+
+            byte[] rgbOut = new byte[cbitKey / 8];
+            byte[] rgbT = new byte[hashLength * c];
+            mac = new HMac(digest);
+            key = new KeyParameter(rgbExtract);
+            mac.Init(key);
+            byte[] rgbLast = new byte[0];
+            byte[] rgbHash2 = new byte[hashLength];
+
+            for (int i = 0; i < c; i++) {
+                mac.Reset();
+                mac.BlockUpdate(rgbLast, 0, rgbLast.Length);
+                mac.BlockUpdate(rgbContext, 0, rgbContext.Length);
+                mac.Update((byte) (i + 1));
+
+                rgbLast = rgbHash2;
+                mac.DoFinal(rgbLast, 0);
+                Array.Copy(rgbT, i*hashLength, rgbLast, 0, hashLength);
+            }
+
+            Array.Copy(rgbT, 0, rgbOut, 0, cbitKey / 8);
+            return rgbOut;
+        }
+
 
         private byte[] KDF(byte[] secret, int cbitKey, CBORObject algorithmID)
         {

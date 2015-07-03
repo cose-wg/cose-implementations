@@ -378,6 +378,7 @@ namespace examples
 
                 case "kid":
                     cborKey = COSE.HeaderKeys.KeyId;
+                    if (cborValue.Type == CBORType.TextString) cborValue = CBORObject.FromObject(UTF8Encoding.UTF8.GetBytes(cborValue.AsString()));
                     break;
 
                 case"epk":
@@ -657,6 +658,9 @@ namespace examples
             case "ES512": return COSE.AlgorithmValues.ECDSA_512;
             case "PS256": return COSE.AlgorithmValues.RSA_PSS_256;
             case "PS512": return COSE.AlgorithmValues.RSA_PSS_512;
+            case "direct": return COSE.AlgorithmValues.Direct;
+            case "AES-CMAC-128/64": return COSE.AlgorithmValues.AES_CMAC_128_64;
+            case "AES-CMAC-256/64": return COSE.AlgorithmValues.AES_CMAC_256_64;
                 
             default: return old;
             }
