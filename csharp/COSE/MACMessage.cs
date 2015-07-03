@@ -25,7 +25,7 @@ namespace COSE
     {
         byte[] rgbTag;
         byte[] rgbContent;
-
+        byte[] external_aad = null;
 
         List<Recipient> recipientList = new List<Recipient>();
 
@@ -131,6 +131,11 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
+        public void SetExternalAAD(byte[] bytes)
+        {
+            external_aad = bytes;
+        }
+
         protected virtual void MAC()
         {
             CBORObject alg;
@@ -173,6 +178,11 @@ namespace COSE
                     ContentKey = AES_MAC(alg, ContentKey);
                     break;
 
+                case "AES-CMAC-128/64":
+                case "AES-CMAC-256/64":
+                    ContentKey = AES_CMAC(alg, ContentKey);
+                    break;
+
                 default:
                     throw new Exception("MAC algorithm is not recognized");
                 }
@@ -205,7 +215,9 @@ namespace COSE
             CBORObject obj = CBORObject.NewArray();
 
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
-            else obj.Add(null);
+            else obj.Add(CBORObject.FromObject(new byte[0]));
+            if (external_aad != null) obj.Add(CBORObject.FromObject(external_aad));
+            else obj.Add(CBORObject.FromObject(new byte[0]));
             obj.Add(rgbContent);
 
             return obj.EncodeToBytes();
@@ -261,6 +273,63 @@ namespace COSE
             hmac.DoFinal(resBuf, 0);
 
             rgbTag = resBuf;
+
+            return K;
+        }
+
+        private byte[] AES_CMAC(CBORObject alg, byte[] K)
+        {
+            int cbitKey;
+            int cbitTag;
+            //  Defaults to PKCS#7
+
+            IBlockCipher aes = new AesFastEngine();
+            CMac mac = new CMac(aes);
+
+            KeyParameter ContentKey;
+
+            //  The requirements from spec
+            //  IV is 128 bits of zeros
+            //  key sizes are 128, 192 and 256 bits
+            //  Authentication tag sizes are 64 and 128 bits
+
+            byte[] IV = new byte[128 / 8];
+
+            Debug.Assert(alg.Type == CBORType.TextString);
+            switch (alg.AsString()) {
+            case "AES-128-MAC-64":
+                cbitKey = 128;
+                cbitTag = 64;
+                break;
+
+            case "AES-CMAC-256/64":
+                cbitKey = 256;
+                cbitTag = 64;
+                break;
+
+            default:
+                throw new Exception("Unrecognized algorithm");
+            }
+
+            if (K == null) {
+                K = new byte[cbitKey / 8];
+                s_PRNG.NextBytes(K);
+            }
+
+            ContentKey = new KeyParameter(K);
+
+            //  Build the text to be digested
+
+            mac.Init(ContentKey);
+
+            byte[] toDigest = BuildContentBytes();
+
+            byte[] C = new byte[128/8];
+            mac.BlockUpdate(toDigest, 0, toDigest.Length);
+            mac.DoFinal(C, 0);
+
+            rgbTag = new byte[cbitTag / 8];
+            Array.Copy(C, 0, rgbTag, 0, cbitTag / 8);
 
             return K;
         }
