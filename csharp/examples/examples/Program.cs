@@ -44,6 +44,7 @@ namespace examples
 
         static void ProcessFile(FileInfo di)
         {
+            if (di.Name[0] == '.') return;
             StreamReader file = File.OpenText(di.FullName);
             string fileText = file.ReadToEnd();
             CBORObject control = CBORObject.FromJSONString(fileText);
@@ -216,8 +217,9 @@ namespace examples
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
                 msg.SetContent(input["plaintext"].AsString());
 
-                if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], true);
-                if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], false);
+                if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], 0);
+                if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], 1);
+                if (sign.ContainsKey("unsent")) AddAttributes(msg, sign["unsent"], 2);
 
                 if ((!sign.ContainsKey("signers")) || (sign["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 foreach (CBORObject recip in sign["signers"].Values) {
@@ -262,8 +264,9 @@ namespace examples
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
                 msg.SetContent(input["plaintext"].AsString());
 
-                if (encrypt.ContainsKey("protected")) AddAttributes(msg, encrypt["protected"], true);
-                if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], false);
+                if (encrypt.ContainsKey("protected")) AddAttributes(msg, encrypt["protected"], 0);
+                if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], 1);
+                if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
 
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
@@ -318,8 +321,9 @@ namespace examples
                 if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
                 msg.SetContent(input["plaintext"].AsString());
 
-                if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], true);
-                if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], false);
+                if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], 0);
+                if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], 1);
+                if (mac.ContainsKey("unsent")) AddAttributes(msg, mac["unsent"], 2);
 
                 if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
@@ -358,7 +362,7 @@ namespace examples
             }
         }
 
-        static void AddAttributes(COSE.Attributes msg, CBORObject items, bool fProtected)
+        static void AddAttributes(COSE.Attributes msg, CBORObject items, int destination)
         {
             foreach (CBORObject cborKey2 in items.Keys) {
                 CBORObject cborValue = items[cborKey2];
@@ -378,6 +382,7 @@ namespace examples
 
                 case "kid":
                     cborKey = COSE.HeaderKeys.KeyId;
+                binFromText:
                     if (cborValue.Type == CBORType.TextString) cborValue = CBORObject.FromObject(UTF8Encoding.UTF8.GetBytes(cborValue.AsString()));
                     break;
 
@@ -385,10 +390,20 @@ namespace examples
                     cborKey = COSE.HeaderKeys.EphemeralKey;
                     break;
 
+                case "salt": cborKey = COSE.CoseKeyParameterKeys.HKDF_Salt; goto binFromText;
+                case "apu_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyU_ID; goto binFromText;
+                case "apv_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyV_ID; goto binFromText;
+                case "supp_pub_other": cborKey = COSE.CoseKeyParameterKeys.HKDF_SuppPub_Other; goto binFromText;
+
                 default:
                     break;
                 }
-                msg.AddAttribute(cborKey, cborValue, fProtected);
+
+                switch (destination) {
+                case 0: msg.AddAttribute(cborKey, cborValue, true); break;
+                case 1: msg.AddAttribute(cborKey, cborValue, false); break;
+                case 2: msg.AddDontSend(cborKey, cborValue); break;
+                }
             }
         }
 
@@ -415,8 +430,9 @@ namespace examples
 
             //  Double check that alg is the same as in the attributes
 
-            if (control.ContainsKey("protected")) AddAttributes(recipient, control["protected"], true);
-            if (control.ContainsKey("unprotected")) AddAttributes(recipient, control["unprotected"], false);
+            if (control.ContainsKey("protected")) AddAttributes(recipient, control["protected"], 0);
+            if (control.ContainsKey("unprotected")) AddAttributes(recipient, control["unprotected"], 1);
+            if (control.ContainsKey("unsent")) AddAttributes(recipient, control["unsent"], 2);
 
             if (control.ContainsKey("recipients")) {
                 if ((!control.ContainsKey("recipients")) || (control["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
@@ -473,8 +489,9 @@ namespace examples
 
             COSE.Signer signer = new COSE.Signer(key, control["alg"]);
 
-            if (control.ContainsKey("protected")) AddAttributes(signer, control["protected"], true);
-            if (control.ContainsKey("unprotected")) AddAttributes(signer, control["unprotected"], false);
+            if (control.ContainsKey("protected")) AddAttributes(signer, control["protected"], 0);
+            if (control.ContainsKey("unprotected")) AddAttributes(signer, control["unprotected"], 1);
+            if (control.ContainsKey("unsent")) AddAttributes(signer, control["unsent"], 2);
 
             return signer;
         }
@@ -661,7 +678,9 @@ namespace examples
             case "direct": return COSE.AlgorithmValues.Direct;
             case "AES-CMAC-128/64": return COSE.AlgorithmValues.AES_CMAC_128_64;
             case "AES-CMAC-256/64": return COSE.AlgorithmValues.AES_CMAC_256_64;
-                
+            case "AES-CCM-128/64": return COSE.AlgorithmValues.AES_CCM_128_64;
+            case "dir+kdf": return COSE.AlgorithmValues.dir_kdf;
+
             default: return old;
             }
         }

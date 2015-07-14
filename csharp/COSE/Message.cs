@@ -56,6 +56,7 @@ namespace COSE
 
         static public readonly CBORObject AES_CMAC_128_64 = CBORObject.FromObject("AES-CMAC-128/64");
         static public readonly CBORObject AES_CMAC_256_64 = CBORObject.FromObject("AES-CMAC-256/64");
+        static public readonly CBORObject AES_CCM_128_64 = CBORObject.FromObject("AES-CCM-128/64");
 
         static public readonly CBORObject RSA_OAEP = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP);
         static public readonly CBORObject RSA_OAEP_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP_256);
@@ -65,6 +66,7 @@ namespace COSE
         static public readonly CBORObject AES_KW_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_KW_256);
 
         static public readonly CBORObject Direct = CBORObject.FromObject(AlgorithmValuesInt.DIRECT);
+        static public readonly CBORObject dir_kdf = CBORObject.FromObject("dir+kdf");
 
         static public readonly CBORObject ECDSA_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDSA_256);
         static public readonly CBORObject ECDSA_512 = CBORObject.FromObject(AlgorithmValuesInt.ECDSA_512);
