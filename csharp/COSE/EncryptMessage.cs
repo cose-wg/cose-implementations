@@ -310,7 +310,7 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "AES-128-CCM-64":
+                case "AES-CCM-128/64":
                     ContentKey = AES_CCM(alg, ContentKey);
                     break;
 
@@ -488,17 +488,17 @@ namespace COSE
             if (K == null) {
                 Debug.Assert(alg.Type == CBORType.TextString);
                 switch (alg.AsString()) {
-                case "AES-128-CCM-64":
+                case "AES-CCM-128/64":
                     K = new byte[128 / 8];
                     cbitTag = 64;
                     break;
 
-                case "AES-196-CCM-64":
+                case "AES-CCM-196/64":
                     K = new byte[196 / 8];
                     cbitTag = 64;
                     break;
 
-                case "AES-256-CCM-64":
+                case "AES-CCM-256/64":
                     K = new byte[256 / 8];
                     cbitTag = 64;
                     break;
@@ -556,9 +556,11 @@ namespace COSE
                 if (algorithm.Type == CBORType.TextString) {
                     switch (algorithm.AsString()) {
                     case "dir":  // Direct encryption mode
+                    case "dir+kdf":
                         if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid parameters");
                         m_recipientType = RecipientType.direct;
                         break;
+
 
                     case "ECDH-ES":
 #if DEBUG
@@ -807,6 +809,7 @@ namespace COSE
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
                 // case "dir":
+                case "dir+kdf":
                 case "ECDH-ES":
                 case "ECDH-SS":
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
@@ -943,7 +946,7 @@ namespace COSE
             int cbitKey;
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "AES-128-CCM-64":
+                case "AES-CCM-128/64":
                 case "AES-CMAC-128/64":
                     cbitKey = 128;
                     break;
@@ -1003,6 +1006,10 @@ namespace COSE
             }
             else if (keyManagement.Type == CBORType.TextString) {
                 switch (keyManagement.AsString()) {
+                case "dir+kdf": 
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes("k"), cbitKey, alg, new Sha256Digest());
+                    
                 case "ECDH-ES": {
                         if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
 
@@ -1270,7 +1277,7 @@ namespace COSE
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPriv_Other);
             if (obj != null) contextArray.Add(obj);
 
-            byte[] rgbContext = obj.EncodeToBytes();
+            byte[] rgbContext = contextArray.EncodeToBytes();
 
             //  See if we have salt
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Salt);
@@ -1279,7 +1286,7 @@ namespace COSE
             //  Perform the Extract phase
             HMac mac = new HMac(digest);
 
-            int hashLength = digest.GetByteLength();
+            int hashLength = digest.GetDigestSize();
             int c = ((cbitKey + 7)/8 + hashLength-1)/hashLength;
 
             byte[] K = new byte[0];
@@ -1310,7 +1317,7 @@ namespace COSE
 
                 rgbLast = rgbHash2;
                 mac.DoFinal(rgbLast, 0);
-                Array.Copy(rgbT, i*hashLength, rgbLast, 0, hashLength);
+                Array.Copy(rgbLast, i*hashLength, rgbT, 0, hashLength);
             }
 
             Array.Copy(rgbT, 0, rgbOut, 0, cbitKey / 8);
