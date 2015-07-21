@@ -310,10 +310,6 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "AES-CCM-128/64":
-                    ContentKey = AES_CCM(alg, ContentKey);
-                    break;
-
                 case "A128CBC-HS256":
                 case "A192CBC-HS256":
                 case "A256CBC-HS256":
@@ -330,6 +326,18 @@ namespace COSE
                 case AlgorithmValuesInt.AES_GCM_256:
                     ContentKey = AES(alg, ContentKey);
                     break;
+
+                case AlgorithmValuesInt.AES_CCM_16_64_128:
+                case AlgorithmValuesInt.AES_CCM_16_64_256:
+                case AlgorithmValuesInt.AES_CCM_64_64_128:
+                case AlgorithmValuesInt.AES_CCM_64_64_256:
+                case AlgorithmValuesInt.AES_CCM_16_128_128:
+                case AlgorithmValuesInt.AES_CCM_16_128_256:
+                case AlgorithmValuesInt.AES_CCM_64_128_128:
+                case AlgorithmValuesInt.AES_CCM_64_128_256:
+                    ContentKey = AES_CCM(alg, ContentKey);
+                    break;
+
 
                 default:
                     throw new CoseException("Content encryption algorithm is not recognized");
@@ -486,19 +494,20 @@ namespace COSE
             }
 
             if (K == null) {
-                Debug.Assert(alg.Type == CBORType.TextString);
-                switch (alg.AsString()) {
-                case "AES-CCM-128/64":
+                Debug.Assert(alg.Type == CBORType.Number);
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_CCM_16_64_128:
+                case AlgorithmValuesInt.AES_CCM_64_64_128:
+                case AlgorithmValuesInt.AES_CCM_16_128_128:
+                case AlgorithmValuesInt.AES_CCM_64_128_128:
                     K = new byte[128 / 8];
                     cbitTag = 64;
                     break;
 
-                case "AES-CCM-196/64":
-                    K = new byte[196 / 8];
-                    cbitTag = 64;
-                    break;
-
-                case "AES-CCM-256/64":
+                case AlgorithmValuesInt.AES_CCM_16_64_256:
+                case AlgorithmValuesInt.AES_CCM_64_64_256:
+                case AlgorithmValuesInt.AES_CCM_16_128_256:
+                case AlgorithmValuesInt.AES_CCM_64_128_256:
                     K = new byte[256 / 8];
                     cbitTag = 64;
                     break;
@@ -946,6 +955,7 @@ namespace COSE
             int cbitKey;
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
+
                 case "AES-CCM-128/64":
                 case "AES-CMAC-128/64":
                     cbitKey = 128;
@@ -966,6 +976,10 @@ namespace COSE
             else if (alg.Type == CBORType.Number) {
                 switch ((AlgorithmValuesInt) alg.AsInt32()) {
                 case AlgorithmValuesInt.AES_GCM_128:
+                case AlgorithmValuesInt.AES_CCM_16_64_128:
+                case AlgorithmValuesInt.AES_CCM_64_64_128:
+                case AlgorithmValuesInt.AES_CCM_16_128_128:
+                case AlgorithmValuesInt.AES_CCM_64_128_128:
                 case AlgorithmValuesInt.AES_KW_128:
                     cbitKey = 128;
                     break;
@@ -976,6 +990,10 @@ namespace COSE
                     break;
 
                 case AlgorithmValuesInt.AES_GCM_256:
+                case AlgorithmValuesInt.AES_CCM_16_64_256:
+                case AlgorithmValuesInt.AES_CCM_64_64_256:
+                case AlgorithmValuesInt.AES_CCM_16_128_256:
+                case AlgorithmValuesInt.AES_CCM_64_128_256:
                 case AlgorithmValuesInt.AES_KW_256:
                 case AlgorithmValuesInt.HMAC_SHA_256:
                     cbitKey = 256;

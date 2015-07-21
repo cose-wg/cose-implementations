@@ -131,6 +131,7 @@ namespace examples
                             modified = true;
                         }
                         FileStream bw = File.OpenWrite(fileName);
+                        bw.SetLength(0);
                         bw.Write(result, 0, result.Length);
                         bw.Close();
                         break;
@@ -678,7 +679,7 @@ namespace examples
             case "direct": return COSE.AlgorithmValues.Direct;
             case "AES-CMAC-128/64": return COSE.AlgorithmValues.AES_CMAC_128_64;
             case "AES-CMAC-256/64": return COSE.AlgorithmValues.AES_CMAC_256_64;
-            case "AES-CCM-128/64": return COSE.AlgorithmValues.AES_CCM_128_64;
+            case "AES-CCM-16-128/64": return COSE.AlgorithmValues.AES_CCM_16_64_128;
             case "dir+kdf": return COSE.AlgorithmValues.dir_kdf;
 
             default: return old;
