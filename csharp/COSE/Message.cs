@@ -36,6 +36,8 @@ namespace COSE
     { 
         AES_GCM_128=1, AES_GCM_192=2, AES_GCM_256=3,
         HMAC_SHA_256=4, HMAC_SHA_384=5, HMAC_SHA_512=6,
+        AES_CCM_16_64_128=10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
+        AES_CCM_16_128_128=12, AES_CCM_16_128_256=13, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
         RSA_OAEP = -1, RSA_OAEP_256 = -2,
         AES_KW_128 = -3, AES_KW_192=-4, AES_KW_256=-5,
         DIRECT = -6,
@@ -56,7 +58,8 @@ namespace COSE
 
         static public readonly CBORObject AES_CMAC_128_64 = CBORObject.FromObject("AES-CMAC-128/64");
         static public readonly CBORObject AES_CMAC_256_64 = CBORObject.FromObject("AES-CMAC-256/64");
-        static public readonly CBORObject AES_CCM_128_64 = CBORObject.FromObject("AES-CCM-128/64");
+
+        static public readonly CBORObject AES_CCM_16_64_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_64_128);
 
         static public readonly CBORObject RSA_OAEP = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP);
         static public readonly CBORObject RSA_OAEP_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP_256);
