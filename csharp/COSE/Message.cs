@@ -137,6 +137,11 @@ namespace COSE
 
         protected static SecureRandom s_PRNG = null;
 
+        public static SecureRandom GetPRNG()
+        {
+            return s_PRNG;
+        }
+
         public static void SetPRNG(SecureRandom prng)
         {
             s_PRNG = prng;

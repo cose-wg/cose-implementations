@@ -221,7 +221,7 @@ namespace COSE
 #else
             CBORObject obj = CBORObject.NewMap();
 
-            CBORObject cborProtected = CBORObject.Null;
+            CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
             if ((objProtected != null) && (objProtected.Count > 0)) {
                 byte[] rgb = objProtected.EncodeToBytes();
                 obj.Add(RecordKeys.Protected, rgb);
@@ -231,8 +231,9 @@ namespace COSE
 
             CBORObject signObj = CBORObject.NewArray();
             signObj.Add(bodyAttributes);
-            signObj.Add(body);
             signObj.Add(cborProtected);
+            signObj.Add(new byte[0]); // External AAD
+            signObj.Add(body);
 
             obj.Add(RecordKeys.Signature, Sign(signObj.EncodeToBytes()));
 #endif
@@ -333,20 +334,21 @@ namespace COSE
                         PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
 
                         RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
+                ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
 
-                        signer.Init(true, prv);
+                        signer.Init(true, param);
                         signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
                         return signer.GenerateSignature();
                     }
 
                 case "ES384":
                  {
-                        SecureRandom random = new SecureRandom();
+                        SecureRandom random = Message.GetPRNG();
 
                         X9ECParameters p = keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
                         ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
-                        ParametersWithRandom param = new ParametersWithRandom(privKey, random);
+                        ParametersWithRandom param = new ParametersWithRandom(privKey, Message.GetPRNG());
 
                         ECDsaSigner ecdsa = new ECDsaSigner();
                         ecdsa.Init(true, param);
@@ -370,8 +372,9 @@ namespace COSE
                         PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
 
                         RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), ConvertBigNum(keyToSign.AsObject("d")), ConvertBigNum(keyToSign.AsObject("p")), ConvertBigNum(keyToSign.AsObject("q")), ConvertBigNum(keyToSign.AsObject("dp")), ConvertBigNum(keyToSign.AsObject("dq")), ConvertBigNum(keyToSign.AsObject("qi")));
+                        ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
 
-                        signer.Init(true, prv);
+                        signer.Init(true, param);
                         signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
                         return signer.GenerateSignature();
                     }
@@ -379,7 +382,7 @@ namespace COSE
                 case AlgorithmValuesInt.ECDSA_256:
                 case AlgorithmValuesInt.ECDSA_512:
                     {
-                        SecureRandom random = new SecureRandom();
+                        SecureRandom random = Message.GetPRNG();
 
                         X9ECParameters p =  keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
@@ -403,7 +406,7 @@ namespace COSE
                     throw new CoseException("Unknown Algorithm");
                 }
             }
-            else throw new CoseException("Algorith incorrectly encoded");
+            else throw new CoseException("Algorithm incorrectly encoded");
 
             return null;
         }
