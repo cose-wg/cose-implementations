@@ -73,16 +73,16 @@ namespace COSE
 #if USE_ARRAY
             obj = CBORObject.NewArray();
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
-            else obj.Add(null);
+            else obj.Add(new byte[0]);
 
             if (objUnprotected.Count > 0) obj.Add(objUnprotected); // Add unprotected attributes
-            else obj.Add(null);
+            else obj.Add(CBORObject.NewMap());
 
             obj.Add(rgbContent);      // Add ciphertext
             obj.Add(rgbTag);
 
             if ((!m_forceArray) && (recipientList.Count == 1)) {
-                CBORObject recipient = recipientList[0].EncodeToCBORObject();
+                CBORObject recipient = recipientList[0].Encode();
 
                 for (int i = 0; i < recipient.Count; i++) {
                     obj.Add(recipient[i]);
@@ -92,7 +92,7 @@ namespace COSE
                 CBORObject recipients = CBORObject.NewArray();
 
                 foreach (Recipient key in recipientList) {
-                    recipients.Add(key.EncodeToCBORObject());
+                    recipients.Add(key.Encode());
                 }
                 obj.Add(recipients);
             }

@@ -1,9 +1,12 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.31101.0
+# Visual Studio 14
+VisualStudioVersion = 14.0.23107.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "examples", "examples\examples.csproj", "{6D95AE00-AD8A-45EE-A11D-6C460D5083B2}"
+	ProjectSection(ProjectDependencies) = postProject
+		{E46041C9-99E8-4BCA-8850-D62A34E2D6E5} = {E46041C9-99E8-4BCA-8850-D62A34E2D6E5}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "COSE", "..\COSE\COSE.csproj", "{D02F476F-BC2C-4D01-BEDE-EB8E79DD050E}"
 EndProject

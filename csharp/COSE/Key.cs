@@ -40,6 +40,50 @@ namespace COSE
             m_map.Add(name, value);
         }
 
+        private bool CompareField(Key key2, CBORObject key)
+        {
+            if (m_map.ContainsKey(key)) {
+                if (!key2.m_map.ContainsKey(key)) return false;
+                return m_map[key].CompareTo(key2.m_map[key]) == 0;
+            }
+            else {
+                return !key2.m_map.ContainsKey(key);
+            }
+        }
+
+
+        public bool Compare(Key key2)
+        {
+            if (key2[CoseKeyKeys.KeyType] != m_map[CoseKeyKeys.KeyType]) return false;
+            if (!CompareField(key2, CoseKeyKeys.KeyIdentifier)) return false;
+            if (!CompareField(key2, CoseKeyKeys.Algorithm)) return false;
+
+            switch ((GeneralValuesInt) m_map[CoseKeyKeys.KeyType].AsInt32()) {
+            case GeneralValuesInt.KeyType_RSA:
+                if (!CompareField(key2, CoseKeyParameterKeys.RSA_e) ||
+                    !CompareField(key2, CoseKeyParameterKeys.RSA_n)) {
+                    return false;
+                }
+                break;
+
+            case GeneralValuesInt.KeyType_EC2:
+                if (!CompareField(key2, CoseKeyParameterKeys.EC_Curve) ||
+                    !CompareField(key2, CoseKeyParameterKeys.EC_X) ||
+                    !CompareField(key2, CoseKeyParameterKeys.EC_Y)) {
+                    return false;
+                }
+                break;
+
+            case GeneralValuesInt.KeyType_Octet:
+                if (!CompareField(key2, CoseKeyParameterKeys.Octet_k)) return false;
+                break;
+
+            default:
+                return true;
+            }
+                        return true;
+        }
+
         public Org.BouncyCastle.Math.BigInteger AsBigInteger(CBORObject keyName)
         {
 
@@ -52,20 +96,27 @@ namespace COSE
             return new Org.BouncyCastle.Math.BigInteger(rgb2);
         }
 
+        public CBORObject AsCBOR()
+        {
+            return m_map;
+        }
+
         public CBORObject this[CBORObject name]
         {
             get { return m_map[name]; }
         }
 
-        public byte[] AsBytes(string name)
+        public byte[] AsBytes(CBORObject name)
         {
             return m_map[name].GetByteString();
         }
 
+#if false
         public CBORObject AsObject(string name)
         {
             return m_map[name];
         }
+#endif
 
         public string AsString(string name)
         {
@@ -116,6 +167,69 @@ namespace COSE
                 }
             }
             else throw new CoseException("Incorrectly encoded key type");
+        }
+
+        public Key PublicKey()
+        {
+            Key newKey = new Key();
+            switch ((GeneralValuesInt) m_map[CoseKeyKeys.KeyType].AsInt16()) {
+            case GeneralValuesInt.KeyType_Octet:
+                return null;
+
+            case GeneralValuesInt.KeyType_RSA:
+                newKey.Add(CoseKeyParameterKeys.RSA_n, m_map[CoseKeyParameterKeys.RSA_n]);
+                newKey.Add(CoseKeyParameterKeys.RSA_e, m_map[CoseKeyParameterKeys.RSA_e]);
+                break;
+
+            case GeneralValuesInt.KeyType_EC2:
+                newKey.Add(CoseKeyParameterKeys.EC_Curve, m_map[CoseKeyParameterKeys.EC_Curve]);
+                newKey.Add(CoseKeyParameterKeys.EC_X, m_map[CoseKeyParameterKeys.EC_X]);
+                newKey.Add(CoseKeyParameterKeys.EC_Y, m_map[CoseKeyParameterKeys.EC_Y]);
+                break;
+
+            default:
+                return null;
+            }
+
+            foreach (CBORObject obj in m_map.Keys) {
+                switch (obj.Type) {
+                case CBORType.Number:
+                    if (obj.AsInt32() > 0) {
+                        newKey.Add(obj, m_map[obj]);
+                    }
+                    break;
+
+                case CBORType.TextString:
+                    newKey.Add(obj, m_map[obj]);
+                    break;
+
+                }
+            }
+                return newKey;
+        }
+    }
+
+    public class KeySet
+    {
+        List<Key> m_keyList = new List<Key>();
+
+        public void AddKey(Key key)
+        {
+            foreach (Key k in m_keyList) {
+                if (key.Compare(k)) return;
+            }
+            m_keyList.Add(key);
+        }
+
+        public byte[] EncodeToBytes()
+        {
+            CBORObject m_array = CBORObject.NewArray();
+
+            foreach (Key k in m_keyList) {
+                m_array.Add(k.AsCBOR());
+            }
+
+            return m_array.EncodeToBytes();
         }
     }
 }
