@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using System.IO;
 
 using PeterO.Cbor;
@@ -16,11 +15,29 @@ namespace examples
     {
         enum Outputs { cbor = 1, cborDiag = 2, jose = 3, jose_compact = 4, jose_flatten = 5 };
 
-        static Outputs[] RgOutputs = new Outputs[] { Outputs.cborDiag, Outputs.cbor  /*, Outputs.cbor, Outputs.cborFlatten*/ };
+        static Outputs[] RgOutputs = new Outputs[] {/* Outputs.cborDiag, */ Outputs.cbor  /*, Outputs.cbor, Outputs.cborFlatten*/ };
+
+        static COSE.KeySet allkeys = new COSE.KeySet();
+        static COSE.KeySet allPubKeys = new COSE.KeySet();
 
         static void Main(string[] args)
         {
             RunTestsInDirectory("c:\\Projects\\COSE\\examples\\spec-examples");
+            {
+                byte[] result = allkeys.EncodeToBytes();
+
+                FileStream bw = File.OpenWrite("c:\\Projects\\COSE\\examples\\spec-examples\\new\\private-keyset.bin");
+                bw.SetLength(0);
+                bw.Write(result, 0, result.Length);
+                bw.Close();
+
+                bw = File.OpenWrite("c:\\Projects\\COSE\\examples\\spec-examples\\new\\public-keyset.bin");
+                bw.SetLength(0);
+                result = allPubKeys.EncodeToBytes();
+                bw.Write(result, 0, result.Length);
+                bw.Close();
+
+            }
         }
 
         static void RunTestsInDirectory(string strDirectory)
@@ -516,6 +533,7 @@ namespace examples
             COSE.Key key = new COSE.Key();
             CBORObject newKey;
             CBORObject newValue;
+            string type = control["kty"].AsString();
 
             foreach (CBORObject item in control.Keys) { 
                 switch (item.AsString()) {
@@ -568,6 +586,8 @@ namespace examples
                     break;
 
                 case "use":
+                    break;
+
                 case "enc":
                     key.Add(item, control[item]);
                     break;
@@ -578,19 +598,27 @@ namespace examples
                 case "e": newKey = COSE.CoseKeyParameterKeys.RSA_e; goto BinaryValue;
                 case "n": newKey = COSE.CoseKeyParameterKeys.RSA_n; goto BinaryValue;
 
-                case "d": newKey = COSE.CoseKeyParameterKeys.EC_D; goto BinaryValue;
-                case "k":
-                case "p":
-                case "q":
-                case "dp":
-                case "dq":
-                case "qi":
-                    newKey = item;
+                case "d":
+                    if (type == "RSA") newKey = COSE.CoseKeyParameterKeys.RSA_d;
+                    else newKey = COSE.CoseKeyParameterKeys.EC_D;
                     goto BinaryValue;
+                case "k": newKey = COSE.CoseKeyParameterKeys.Octet_k; goto BinaryValue;
+                case "p": newKey = COSE.CoseKeyParameterKeys.RSA_p; goto BinaryValue;
+                case "q": newKey = COSE.CoseKeyParameterKeys.RSA_q; goto BinaryValue;
+                case "dp": newKey = COSE.CoseKeyParameterKeys.RSA_dP; goto BinaryValue;
+                case "dq": newKey = COSE.CoseKeyParameterKeys.RSA_dQ; goto BinaryValue;
+                case "qi": newKey = COSE.CoseKeyParameterKeys.RSA_qInv; goto BinaryValue;
 
                 default:
                     throw new Exception("Unrecognized field name " + item.AsString() + " in key object");
                 }
+            }
+
+            allkeys.AddKey(key);
+
+            COSE.Key pubKey = key.PublicKey();
+            if (pubKey != null) {
+                allPubKeys.AddKey(key.PublicKey());
             }
             return key;
         }
