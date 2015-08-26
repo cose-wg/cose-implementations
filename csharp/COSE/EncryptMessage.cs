@@ -566,15 +566,6 @@ namespace COSE
                         m_recipientType = RecipientType.direct;
                         break;
 
-
-                    case "ECDH-ES":
-#if DEBUG
-                    case "ECDH-SS":
-#endif // DEBUG
-                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameters");
-                        m_recipientType = RecipientType.keyAgreeDirect;
-                        break;
-
                     case "A128GCMKW":
                     case "A192GCMKW":
                     case "A256GCMKW":
@@ -582,12 +573,6 @@ namespace COSE
                         m_recipientType = RecipientType.keyWrap;
                         break;
 
-                    case "ECDH-ES+A128KW":
-                    case "ECDH-ES+A192KW":
-                    case "ECDH-ES+A256KW":
-                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameter");
-                        m_recipientType = RecipientType.keyAgree;
-                        break;
 
                     case "PBES2-HS256+A128KW":
                     case "PBES2-HS256+A192KW":
@@ -618,6 +603,21 @@ namespace COSE
                     case AlgorithmValuesInt.DIRECT:  // Direct encryption mode
                         if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Invalid parameters");
                         m_recipientType = RecipientType.direct;
+                        break;
+
+                    case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
+                    case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
+                    case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameter");
+                        m_recipientType = RecipientType.keyAgree;
+                        break;
+
+                    case AlgorithmValuesInt.ECDH_ES_HKDF_256:
+#if DEBUG
+                    case AlgorithmValuesInt.ECDH_SS_HKDF_256:
+#endif // DEBUG
+                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameters");
+                        m_recipientType = RecipientType.keyAgreeDirect;
                         break;
 
                     default:
@@ -659,7 +659,7 @@ namespace COSE
 
                     case GeneralValuesInt.KeyType_EC2:
                         m_recipientType = RecipientType.keyAgree;
-                        algorithm = CBORObject.FromObject("ECDH-ES+A128KW");
+                        algorithm =  AlgorithmValues.ECDH_ES_HKDF_256_AES_KW_128;
                         break;
                     }
                     AddUnprotected(HeaderKeys.Algorithm, algorithm);
@@ -723,10 +723,6 @@ namespace COSE
                     if (key.AsString("kty") != "oct") return null;
                     return key.AsBytes(CoseKeyParameterKeys.Octet_k);
 
-                case "ECDH-ES":
-                    rgbSecret = ECDH_GenerateSecret(key);
-                    return KDF(rgbSecret, cbitCEK, algCEK);
-
                 case "A128GCMKW": return AES_GCM_KeyUnwrap(key, 128);
                 case "A192GCMKW": return AES_GCM_KeyUnwrap(key, 192);
                 case "A256GCMKW": return AES_GCM_KeyUnwrap(key, 256);
@@ -743,20 +739,6 @@ namespace COSE
                     rgbKey = PBKF2(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), FindAttribute("p2s").GetByteString(), FindAttribute("p2c").AsInt32(), 256 / 8, new Sha256Digest());
                     return AES_KeyUnwrap(null, 256, rgbKey);
 
-                case "ECDH-ES+A128KW":
-                    rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 128, alg);
-                    return AES_KeyUnwrap(null, 128, rgbKey);
-
-                case "ECDH-ES+A192KW":
-                    rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
-                    return AES_KeyUnwrap(null, 192, rgbKey);
-
-                case "ECDH-ES+A256KW":
-                    rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 256, alg);
-                    return AES_KeyUnwrap(null, 256, rgbKey);
                 }
             }
             else if (alg.Type == CBORType.Number) {
@@ -767,6 +749,25 @@ namespace COSE
                 case AlgorithmValuesInt.AES_KW_128: return AES_KeyUnwrap(key, 128);
                 case AlgorithmValuesInt.AES_KW_192: return AES_KeyUnwrap(key, 192);
                 case AlgorithmValuesInt.AES_KW_256: return AES_KeyUnwrap(key, 256);
+
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256:
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    return KDF(rgbSecret, cbitCEK, algCEK);
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 128, alg);
+                    return AES_KeyUnwrap(null, 128, rgbKey);
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    return AES_KeyUnwrap(null, 192, rgbKey);
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
+                    rgbSecret = ECDH_GenerateSecret(key);
+                    rgbKey = KDF(rgbSecret, 256, alg);
+                    return AES_KeyUnwrap(null, 256, rgbKey);
 
                 default:
                     throw new CoseException("Algorithm not supported " + alg.AsInt32());
@@ -815,34 +816,9 @@ namespace COSE
                 switch (alg.AsString()) {
                 // case "dir":
                 case "dir+kdf":
-                case "ECDH-ES":
-                case "ECDH-SS":
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     break;
 
-                case "ECDH-ES+A128KW":
-                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
-                    ECDH_GenerateEphemeral();
-                    rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 128, alg);
-                    AES_KeyWrap(128, rgbKey);
-                    break;
-
-                case "ECDH-ES+A192KW":
-                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
-                    ECDH_GenerateEphemeral();
-                    rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
-                    AES_KeyWrap(192, rgbKey);
-                    break;
-
-                case "ECDH-ES+A256KW":
-                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
-                    ECDH_GenerateEphemeral();
-                    rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
-                    AES_KeyWrap(192, rgbKey);
-                    break;
 
                 case "A128GCMKW": AES_GCM_KeyWrap(rgbKey, 128); break;
                 case "A192GCMKW": AES_GCM_KeyWrap(rgbKey, 192); break;
@@ -909,9 +885,33 @@ namespace COSE
             else if (alg.Type == CBORType.Number) {
                 switch ((AlgorithmValuesInt) alg.AsInt32()) {
                 case AlgorithmValuesInt.DIRECT:
-                // case "ECDH-ES":
-                // case "ECDH-SS":
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256:
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256:
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
+                    break;
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 128, alg);
+                    AES_KeyWrap(128, rgbKey);
+                    break;
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    AES_KeyWrap(192, rgbKey);
+                    break;
+
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
+                    ECDH_GenerateEphemeral();
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 192, alg);
+                    AES_KeyWrap(192, rgbKey);
                     break;
 
                 case AlgorithmValuesInt.RSA_OAEP:
@@ -1014,17 +1014,8 @@ namespace COSE
                     if (rgb.Length * 8 != cbitKey) throw new CoseException("Incorrect key size");
                     return rgb;
 
-                default:
-                    throw new CoseException("Unknown algorithm");
-                }
-            }
-            else if (keyManagement.Type == CBORType.TextString) {
-                switch (keyManagement.AsString()) {
-                case "dir+kdf": 
-                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
-                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitKey, alg, new Sha256Digest());
-                    
-                case "ECDH-ES": {
+                case AlgorithmValuesInt.ECDH_ES_HKDF_256:
+                    {
                         if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
 
                         ECDH_GenerateEphemeral();
@@ -1034,7 +1025,8 @@ namespace COSE
                         return KDF(rgbSecret, cbitKey, alg);
                     }
 
-                case "ECDH-SS": {
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256:
+                    {
                         if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
                         if (FindAttribute("apu") == null) {
                             byte[] rgbAPU = new byte[512 / 8];
@@ -1045,6 +1037,17 @@ namespace COSE
                         return KDF(rgbSecret, cbitKey, alg);
                     }
 
+
+                default:
+                    throw new CoseException("Unknown algorithm");
+                }
+            }
+            else if (keyManagement.Type == CBORType.TextString) {
+                switch (keyManagement.AsString()) {
+                case "dir+kdf": 
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitKey, alg, new Sha256Digest());
+                    
                 default:
                     throw new CoseException("Unknown algorithm");
 
