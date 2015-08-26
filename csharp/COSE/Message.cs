@@ -28,7 +28,7 @@ namespace COSE
         static public readonly CBORObject Algorithm = CBORObject.FromObject(1);
         static public readonly CBORObject Critical = CBORObject.FromObject(2);
         static public readonly CBORObject ContentType = CBORObject.FromObject(3);
-        static public readonly CBORObject EphemeralKey = CBORObject.FromObject(999);
+        static public readonly CBORObject EphemeralKey = CBORObject.FromObject(-1);
         static public readonly CBORObject KeyId = CBORObject.FromObject(4);
         static public readonly CBORObject IV = CBORObject.FromObject(5);
     }
@@ -43,8 +43,10 @@ namespace COSE
         AES_KW_128 = -3, AES_KW_192=-4, AES_KW_256=-5,
         DIRECT = -6,
         ECDSA_256 = -7, ECDSA_384=-8, ECDSA_512=-9,
-        RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28
-        
+        RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
+        ECDH_ES_HKDF_256=50,
+        ECDH_SS_HKDF_256=52,
+        ECDH_ES_HKDF_256_AES_KW_128 = 55, ECDH_ES_HKDF_256_AES_KW_192 = 56, ECDH_ES_HKDF_256_AES_KW_256 = 57,
     }
 
     public class AlgorithmValues
@@ -77,6 +79,13 @@ namespace COSE
 
         static public readonly CBORObject RSA_PSS_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_PSS_256);
         static public readonly CBORObject RSA_PSS_512 = CBORObject.FromObject(AlgorithmValuesInt.RSA_PSS_512);
+
+        static public readonly CBORObject ECDH_ES_HKDF_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256);
+        static public readonly CBORObject ECDH_SS_HKDF_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256);
+
+        static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_128 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128);
+        static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_192 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192);
+        static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256);
     }
 
     public class CoseKeyKeys

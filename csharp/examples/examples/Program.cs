@@ -15,7 +15,7 @@ namespace examples
     {
         enum Outputs { cbor = 1, cborDiag = 2, jose = 3, jose_compact = 4, jose_flatten = 5 };
 
-        static Outputs[] RgOutputs = new Outputs[] {/* Outputs.cborDiag, */ Outputs.cbor  /*, Outputs.cbor, Outputs.cborFlatten*/ };
+        static Outputs[] RgOutputs = new Outputs[] {Outputs.cborDiag, Outputs.cbor  /*, Outputs.cbor, Outputs.cborFlatten*/ };
 
         static COSE.KeySet allkeys = new COSE.KeySet();
         static COSE.KeySet allPubKeys = new COSE.KeySet();
@@ -412,6 +412,7 @@ namespace examples
                 case "apu_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyU_ID; goto binFromText;
                 case "apv_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyV_ID; goto binFromText;
                 case "supp_pub_other": cborKey = COSE.CoseKeyParameterKeys.HKDF_SuppPub_Other; goto binFromText;
+                case "spk_kid": cborKey = COSE.CoseKeyParameterKeys.ECDH_StaticKey_kid; goto binFromText;
 
                 default:
                     break;
@@ -709,6 +710,9 @@ namespace examples
             case "AES-CMAC-256/64": return COSE.AlgorithmValues.AES_CMAC_256_64;
             case "AES-CCM-16-128/64": return COSE.AlgorithmValues.AES_CCM_16_64_128;
             case "dir+kdf": return COSE.AlgorithmValues.dir_kdf;
+            case "ECDH-ES": return COSE.AlgorithmValues.ECDH_ES_HKDF_256;
+            case "ECDH-SS": return COSE.AlgorithmValues.ECDH_SS_HKDF_256;
+            case "ECDH-ES+A128KW": return COSE.AlgorithmValues.ECDH_ES_HKDF_256_AES_KW_128;
 
             default: return old;
             }
