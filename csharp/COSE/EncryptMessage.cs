@@ -142,7 +142,6 @@ namespace COSE
 
 #if USE_ARRAY
             obj = CBORObject.NewArray();
-            obj.Add(2);  // Tag as an encrypt item
 #else
             obj = CBORObject.NewMap();
             obj.Add(RecordKeys.MsgType, 2);
@@ -155,6 +154,7 @@ namespace COSE
 #else
             foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
 #endif
+            if (m_useTag) return  CBORObject.FromObjectAndTag(obj, (int) Tags.Enveloped);
             return obj;
         }
 
@@ -164,6 +164,16 @@ namespace COSE
             
             if (rgbEncrypted == null) Encrypt();
 
+            if (m_counterSignerList.Count() != 0) {
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
+                    }
+                }
+            }
 #if USE_ARRAY
             obj = CBORObject.NewArray();
 
