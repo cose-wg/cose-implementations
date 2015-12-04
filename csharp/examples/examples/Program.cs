@@ -22,6 +22,8 @@ namespace examples
 
         static void Main(string[] args)
         {
+           //  COSE.Key.NewKey();
+
             RunTestsInDirectory("c:\\Projects\\COSE\\examples\\spec-examples");
             {
                 byte[] result = allkeys.EncodeToBytes();
@@ -285,6 +287,7 @@ namespace examples
                 if (encrypt.ContainsKey("protected")) AddAttributes(msg, encrypt["protected"], 0);
                 if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], 1);
                 if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
+                if (encrypt.ContainsKey("countersign")) AddCounterSignature(msg, encrypt["countersign"]);
 
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
@@ -433,6 +436,16 @@ namespace examples
                     msg.AddAttribute(key.AsString().Substring(0, key.AsString().Length - 4), JOSE.Message.base64urlencode(FromHex(items[key].AsString())), fProtected);
                 }
                 else msg.AddAttribute(key.AsString(), items[key].AsString(), fProtected);
+            }
+        }
+
+        static void AddCounterSignature(COSE.Message msg, CBORObject items)
+        {
+            if (items.Type == CBORType.Map) {
+                if ((!items.ContainsKey("signers")) || (items["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed counter signatures");
+                foreach (CBORObject recip in items["signers"].Values) {
+                    msg.AddCounterSignature(GetSigner(recip));
+                }
             }
         }
 
@@ -717,6 +730,7 @@ namespace examples
             default: return old;
             }
         }
+
     }
 
     class BadOutputException : Exception 

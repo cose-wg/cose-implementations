@@ -50,7 +50,6 @@ namespace COSE
 
 #if USE_ARRAY
             obj = CBORObject.NewArray();
-            obj.Add(3);  // Tag as an MAC item
 
             for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
 #else
@@ -59,7 +58,7 @@ namespace COSE
 
             foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
 #endif
-
+            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.MAC);
             return obj;
         }
 
@@ -72,6 +71,7 @@ namespace COSE
 
 #if USE_ARRAY
             obj = CBORObject.NewArray();
+
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
             else obj.Add(new byte[0]);
 

@@ -10,6 +10,12 @@ using PeterO.Cbor;
 
 namespace COSE
 {
+
+    public enum Tags
+    { 
+        Encrypted = 997, Enveloped =998,Signed = 999, MAC = 996
+    }
+
     public class RecordKeys
     {
         static public readonly CBORObject MsgType = CBORObject.FromObject(1);
@@ -31,6 +37,8 @@ namespace COSE
         static public readonly CBORObject EphemeralKey = CBORObject.FromObject(-1);
         static public readonly CBORObject KeyId = CBORObject.FromObject(4);
         static public readonly CBORObject IV = CBORObject.FromObject(5);
+        static public readonly CBORObject PartialIV = CBORObject.FromObject(6);
+        static public readonly CBORObject CounterSign = CBORObject.FromObject(7);
     }
 
     public enum AlgorithmValuesInt : int
@@ -154,8 +162,9 @@ namespace COSE
     public abstract class Message : Attributes
     {
         protected bool m_forceArray = true;
-
+        protected List<COSE.Signer> m_counterSignerList = new List<Signer>();
         protected static SecureRandom s_PRNG = null;
+        protected bool m_useTag = true;
 
         public static SecureRandom GetPRNG()
         {
@@ -190,6 +199,17 @@ namespace COSE
         public void ForceArray(bool f)
         {
             m_forceArray = f;
+        }
+
+        public bool EmitTag
+        {
+            get { return m_useTag; }
+            set { m_useTag = value; }
+        }
+
+        public void AddCounterSignature(COSE.Signer signer)
+        {
+            m_counterSignerList.Add(signer);
         }
     }
 

@@ -9,6 +9,11 @@ using PeterO.Cbor;
 using Org.BouncyCastle.Asn1.Nist;
 using Org.BouncyCastle.Asn1.X9;
 
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Agreement;
+using Org.BouncyCastle.Crypto.Generators;
+using Org.BouncyCastle.Crypto.Parameters;
+
 namespace COSE
 {
     public class Key
@@ -206,6 +211,29 @@ namespace COSE
                 }
             }
                 return newKey;
+        }
+
+        public static void NewKey()
+        {
+            X9ECParameters p = NistNamedCurves.GetByName("P-256");
+
+            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+
+            ECKeyPairGenerator pGen = new ECKeyPairGenerator();
+           ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, new Org.BouncyCastle.Security.SecureRandom());
+            pGen.Init(genParam);
+
+            AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
+
+            CBORObject epk = CBORObject.NewMap();
+            epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
+            epk.Add(CoseKeyParameterKeys.EC_Curve, "P-256");
+            ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+            epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add(CoseKeyParameterKeys.EC_Y, priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
+            epk.Add(CoseKeyParameterKeys.EC_D, ((ECPrivateKeyParameters) p1.Private).D.ToByteArrayUnsigned());
+
+            string xxx = epk.ToJSONString();
         }
     }
 
