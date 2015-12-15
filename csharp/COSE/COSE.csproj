@@ -55,9 +55,9 @@
       <Project>{38872a5f-e87e-4fad-b109-8eb7b2e6a4a0}</Project>
       <Name>crypto</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\CBOR\Portable.CBOR.csproj">
+    <ProjectReference Include="..\..\..\CBOR\CBOR.csproj">
       <Project>{23a1b70c-f064-47b6-8b7e-e2042cdad8c7}</Project>
-      <Name>Portable.CBOR</Name>
+      <Name>CBOR</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

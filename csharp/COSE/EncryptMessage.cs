@@ -27,17 +27,24 @@ using System.Diagnostics;
 
 namespace COSE
 {
-    public class EncryptMessage : Message
+    public class EnvelopeMessage : Message
     {
-        CBORObject obj;
+        protected CBORObject obj;
+        string context = "Enveloped";
 
         protected List<Recipient> recipientList = new List<Recipient>();
         protected byte[] rgbEncrypted;
         protected byte[] rgbContent;
-        byte[] extern_aad = null;
+        byte[] extern_aad = new byte[0];
+
+        public List<Recipient> RecipientList
+        {
+            get { return recipientList; }
+        } 
 
         public void AddRecipient(Recipient recipient)
         {
+            recipient.SetContext( "Env_Recipient");
             recipientList.Add(recipient);
         }
 
@@ -136,7 +143,7 @@ namespace COSE
             return obj.EncodeToBytes();
         }
 
-        public CBORObject EncodeToCBORObject()
+        public virtual CBORObject EncodeToCBORObject()
         {
             CBORObject obj3;
 
@@ -379,6 +386,11 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
+        public void SetContext(string newContext)
+        {
+            context = newContext;
+        }
+
         public void SetExternalAAD(byte[] aadBytes)
         {
             extern_aad = aadBytes;
@@ -542,13 +554,13 @@ namespace COSE
             return K;
         }
 
-        byte[] getAADBytes()
+        public byte[] getAADBytes()
         {
             CBORObject obj = CBORObject.NewArray();
 
+            obj.Add(context);
             obj.Add( objProtected.EncodeToBytes());
-            if (extern_aad == null) obj.Add(CBORObject.FromObject(new byte[0]));
-            else obj.Add(CBORObject.FromObject(extern_aad));
+            obj.Add(CBORObject.FromObject(extern_aad));
 
             return obj.EncodeToBytes();
         }
@@ -559,7 +571,7 @@ namespace COSE
         direct=1, keyAgree=2, keyTransport=3, keyWrap=4, keyAgreeDirect=5, keyTransportAndWrap=6, password=7
     }
 
-    public class Recipient : EncryptMessage
+    public class Recipient : EnvelopeMessage
     {
         RecipientType m_recipientType;
         Key m_key;
@@ -618,6 +630,9 @@ namespace COSE
                     case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
                     case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
                     case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
+                    case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
+                    case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
+                    case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
                         if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyAgree;
                         break;
@@ -765,16 +780,19 @@ namespace COSE
                     return KDF(rgbSecret, cbitCEK, algCEK);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     rgbSecret = ECDH_GenerateSecret(key);
                     rgbKey = KDF(rgbSecret, 128, alg);
                     return AES_KeyUnwrap(null, 128, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
                     rgbSecret = ECDH_GenerateSecret(key);
                     rgbKey = KDF(rgbSecret, 192, alg);
                     return AES_KeyUnwrap(null, 192, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
                     rgbSecret = ECDH_GenerateSecret(key);
                     rgbKey = KDF(rgbSecret, 256, alg);
                     return AES_KeyUnwrap(null, 256, rgbKey);
@@ -920,8 +938,15 @@ namespace COSE
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     ECDH_GenerateEphemeral();
                     rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
-                    AES_KeyWrap(192, rgbKey);
+                    rgbKey = KDF(rgbSecret, 256, alg);
+                    AES_KeyWrap(256, rgbKey);
+                    break;
+
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorith");
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = KDF(rgbSecret, 128, alg);
+                    AES_KeyWrap(128, rgbKey);
                     break;
 
                 case AlgorithmValuesInt.RSA_OAEP:
@@ -1262,8 +1287,7 @@ namespace COSE
             return k1.ToByteArrayUnsigned();
         }
 
-
-        private byte[] HKDF(byte[] secret, int cbitKey, CBORObject algorithmID, IDigest digest)
+        public byte[] GetKDFInput(int cbitKey, CBORObject algorithmID)
         {
             CBORObject obj;
 
@@ -1297,6 +1321,8 @@ namespace COSE
             info = CBORObject.NewArray();
             contextArray.Add(info);
             info.Add(CBORObject.FromObject(cbitKey));
+            if (objProtected.Count == 0) info.Add(new byte[0]);
+            else info.Add(objProtected.EncodeToBytes());
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPub_Other);
             if (obj != null) info.Add(obj);
 
@@ -1304,7 +1330,12 @@ namespace COSE
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPriv_Other);
             if (obj != null) contextArray.Add(obj);
 
-            byte[] rgbContext = contextArray.EncodeToBytes();
+            return contextArray.EncodeToBytes();
+        }
+
+        private byte[] HKDF(byte[] secret, int cbitKey, CBORObject algorithmID, IDigest digest)
+        {
+            byte[] rgbContext = GetKDFInput(cbitKey, algorithmID);
 
             //  See if we have salt
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Salt);
@@ -1513,5 +1544,66 @@ namespace COSE
             return rgbOut;
         }
  
+    }
+
+    public class EncryptMessage : EnvelopeMessage
+    {
+        public EncryptMessage() : base()
+        {
+            SetContext("Encrypt");
+        }
+
+        public override CBORObject Encode()
+        {
+            CBORObject obj;
+
+            if (rgbEncrypted == null) Encrypt();
+
+            if (m_counterSignerList.Count() != 0) {
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
+                    }
+                }
+            }
+            obj = CBORObject.NewArray();
+
+            if (objProtected.Count > 0) {
+                obj.Add(objProtected.EncodeToBytes());
+            }
+            else obj.Add(CBORObject.FromObject(new byte[0]));
+
+            obj.Add(objUnprotected); // Add unprotected attributes
+
+            if (rgbEncrypted == null) obj.Add(new byte[0]);
+            else obj.Add(rgbEncrypted);      // Add ciphertext
+
+            return obj;
+        }
+        public override CBORObject EncodeToCBORObject()
+        {
+            CBORObject obj3;
+
+#if USE_ARRAY
+            obj = CBORObject.NewArray();
+#else
+            obj = CBORObject.NewMap();
+            obj.Add(RecordKeys.MsgType, 2);
+#endif
+
+            obj3 = Encode();
+
+#if USE_ARRAY
+            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
+#else
+            foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
+#endif
+            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.Encrypted);
+            return obj;
+        }
+
     }
 }
