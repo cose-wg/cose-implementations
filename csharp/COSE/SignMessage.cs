@@ -467,8 +467,8 @@ namespace COSE
             byte[] rgbBody = null;
 
             if (m_msgToSign != null) {
-                if (m_msgToSign.GetType() == typeof(EncryptMessage)) {
-                    EncryptMessage msg = (EncryptMessage) m_msgToSign;
+                if (m_msgToSign.GetType() == typeof(EnvelopeMessage)) {
+                    EnvelopeMessage msg = (EnvelopeMessage) m_msgToSign;
                     msg.Encrypt();
                     CBORObject obj = msg.EncodeToCBORObject();
                     if (obj[1].Type != CBORType.ByteString) throw new Exception("Internal error");

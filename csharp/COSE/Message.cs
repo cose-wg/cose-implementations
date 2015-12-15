@@ -54,7 +54,8 @@ namespace COSE
         RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
         ECDH_ES_HKDF_256=50,
         ECDH_SS_HKDF_256=52,
-        ECDH_ES_HKDF_256_AES_KW_128 = 55, ECDH_ES_HKDF_256_AES_KW_192 = 56, ECDH_ES_HKDF_256_AES_KW_256 = 57,
+        ECDH_ES_HKDF_256_AES_KW_128 = 54, ECDH_ES_HKDF_256_AES_KW_192 = 55, ECDH_ES_HKDF_256_AES_KW_256 = 56,
+        ECDH_SS_HKDF_256_AES_KW_128 = 57, ECDH_SS_HKDF_256_AES_KW_192 = 58, ECDH_SS_HKDF_256_AES_KW_256 = 59,
     }
 
     public class AlgorithmValues
@@ -94,6 +95,7 @@ namespace COSE
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_128 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128);
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_192 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192);
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256);
+        static public readonly CBORObject ECDH_SS_HKDF_256_AES_KW_128 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128);
     }
 
     public class CoseKeyKeys
@@ -184,7 +186,7 @@ namespace COSE
 
             switch (messageObject[0].AsInt16()) {
             case 1:         // It is an encrytion message
-                EncryptMessage enc = new EncryptMessage();
+                EnvelopeMessage enc = new EnvelopeMessage();
 
                 enc.DecodeFromCBORObject(messageObject, 1, messageObject.Count - 1);
                 return enc;

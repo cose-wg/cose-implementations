@@ -31,6 +31,7 @@ namespace COSE
 
         public void AddRecipient(Recipient recipient)
         {
+            recipient.SetContext("Mac_Recipient");
             recipientList.Add(recipient);
         }
 
@@ -210,10 +211,11 @@ namespace COSE
             return;
         }
 
-        private byte[] BuildContentBytes()
+        public byte[] BuildContentBytes()
         {
             CBORObject obj = CBORObject.NewArray();
 
+            obj.Add("MAC");
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
             else obj.Add(CBORObject.FromObject(new byte[0]));
             if (external_aad != null) obj.Add(CBORObject.FromObject(external_aad));

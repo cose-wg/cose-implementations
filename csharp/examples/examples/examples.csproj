@@ -57,10 +57,6 @@
       <Project>{38872a5f-e87e-4fad-b109-8eb7b2e6a4a0}</Project>
       <Name>crypto</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\..\..\CBOR\Portable.CBOR.csproj">
-      <Project>{23a1b70c-f064-47b6-8b7e-e2042cdad8c7}</Project>
-      <Name>Portable.CBOR</Name>
-    </ProjectReference>
     <ProjectReference Include="..\..\COSE\COSE.csproj">
       <Project>{d02f476f-bc2c-4d01-bede-eb8e79dd050e}</Project>
       <Name>COSE</Name>

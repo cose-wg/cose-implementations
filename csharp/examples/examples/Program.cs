@@ -126,8 +126,9 @@ namespace examples
                 try {
                     byte[] result;
 
-                    if (control["input"].ContainsKey("mac")) result = ProcessMAC(output, control);
-                    else if (control["input"].ContainsKey("encrypt")) result = ProcessEncrypt(output, control);
+                    if (control["input"].ContainsKey("mac")) result = ProcessMAC(output, control, ref modified);
+                    else if (control["input"].ContainsKey("enveloped")) result = ProcessEnveloped(output, control, ref modified);
+                    else if (control["input"].ContainsKey("encrypted")) result = ProcessEncrypted(output, control, ref modified);
                     else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
                     else throw new Exception("Unknown operation in control");
 
@@ -271,13 +272,13 @@ namespace examples
             }
         }
 
-        static byte[] ProcessEncrypt(Outputs outputFormat, CBORObject control)
+        static byte[] ProcessEncrypted(Outputs outputFormat, CBORObject control, ref bool fDirty)
         {
             CBORObject input = control["input"];
-            CBORObject encrypt = input["encrypt"];
+            CBORObject encrypt = input["encrypted"];
 
             if (outputFormat < Outputs.jose) {
-                COSE.EncryptMessage msg = new COSE.EncryptMessage();
+                COSE.EnvelopeMessage msg = new COSE.EncryptMessage();
 
                 msg.ForceArray(true);
 
@@ -296,6 +297,149 @@ namespace examples
                 foreach (CBORObject recip in encrypt["recipients"].Values) {
                     msg.AddRecipient(GetRecipient(recip));
                 }
+
+                {
+                    string aad = Convert.ToBase64String(msg.getAADBytes());
+                    CBORObject intermediates;
+                    if (!control.ContainsKey("intermediates")) {
+                        intermediates = CBORObject.NewMap();
+                        control.Add("intermediates", intermediates);
+                        fDirty = true;
+                    }
+                    else {
+                        intermediates = control["intermediates"];
+                    }
+
+                    string aad_old;
+                    if (intermediates.ContainsKey("AAD")) {
+                        aad_old = intermediates["AAD"].AsString();
+                        if (aad_old != aad) {
+                            intermediates["AAD"] = CBORObject.FromObject( aad);
+                            fDirty = true;
+                        }
+                    }
+                    else {
+                        intermediates.Add("AAD", aad);
+                        fDirty = true;
+                    }
+                }
+
+                if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
+                return msg.EncodeToBytes();
+            }
+            else {
+                JOSE.EncryptMessage msg = new JOSE.EncryptMessage();
+
+                if (outputFormat != Outputs.jose_flatten) msg.ForceArray(true);
+
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
+
+                if (encrypt.ContainsKey("aad")) msg.SetAAD(encrypt["aad"].AsString());
+
+                if (encrypt.ContainsKey("protected_jose")) AddAttributes(msg, encrypt["protected_jose"], true);
+                if (encrypt.ContainsKey("unprotected_jose")) AddAttributes(msg, encrypt["unprotected_jose"], false);
+
+                if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
+
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                if ((encrypt["recipients"].Count > 1) && (outputFormat != Outputs.jose)) throw new BadOutputException();
+
+                foreach (CBORObject recip in encrypt["recipients"].Values) {
+                    msg.AddRecipient(GetRecipientJOSE(recip));
+                }
+
+                if (outputFormat == Outputs.jose_compact) return UTF8Encoding.UTF8.GetBytes(msg.EncodeCompact());
+                return UTF8Encoding.UTF8.GetBytes(msg.Encode());
+
+            }
+        }
+
+        static byte[] ProcessEnveloped(Outputs outputFormat, CBORObject control, ref bool fDirty)
+        {
+            CBORObject input = control["input"];
+            CBORObject encrypt = input["enveloped"];
+
+            if (outputFormat < Outputs.jose) {
+                COSE.EnvelopeMessage msg = new COSE.EnvelopeMessage();
+
+                msg.ForceArray(true);
+
+                if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+                msg.SetContent(input["plaintext"].AsString());
+
+                if (encrypt.ContainsKey("protected")) AddAttributes(msg, encrypt["protected"], 0);
+                if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], 1);
+                if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
+                if (encrypt.ContainsKey("countersign")) AddCounterSignature(msg, encrypt["countersign"]);
+
+                if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+                //  Should check that this exists somewhere and has the correct value
+
+                if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+                foreach (CBORObject recip in encrypt["recipients"].Values) {
+                    msg.AddRecipient(GetRecipient(recip));
+                }
+
+                if (outputFormat == Outputs.cborDiag) {
+                    msg.Encrypt();
+
+                    string aad = Convert.ToBase64String(msg.getAADBytes());
+                    CBORObject intermediates;
+                    if (!control.ContainsKey("intermediates")) {
+                        intermediates = CBORObject.NewMap();
+                        control.Add("intermediates", intermediates);
+                        fDirty = true;
+                    }
+                    else {
+                        intermediates = control["intermediates"];
+                    }
+
+                    string aad_old;
+                    if (intermediates.ContainsKey("AAD")) {
+                        aad_old = intermediates["AAD"].AsString();
+                        if (aad_old != aad) {
+                            intermediates["AAD"] = CBORObject.FromObject(aad);
+                            fDirty = true;
+                        }
+                    }
+                    else {
+                        intermediates.Add("AAD", aad);
+                        fDirty = true;
+                    }
+
+                    CBORObject rList;
+                    if (intermediates.ContainsKey("recipients")) rList = intermediates["recipients"];
+                    else {
+                        rList = CBORObject.NewArray();
+                        intermediates.Add("recipients", rList);
+                        fDirty = true;
+                    }
+
+                    for (int iRecipient = 0; iRecipient < msg.RecipientList.Count; iRecipient++) {
+                        string foo = Convert.ToBase64String(msg.RecipientList[iRecipient].GetKDFInput(255, msg.FindAttribute(COSE.HeaderKeys.Algorithm)));
+                        CBORObject r;
+                        if (rList.Count <= iRecipient) {
+                            r = CBORObject.NewMap();
+                            rList.Add(r);
+                            fDirty = true;
+                        }
+                        else r = rList[iRecipient];
+            
+                        if (r.ContainsKey("KDF")) {
+                            if (foo != r["KDF"].AsString()) {
+                                r["KDF"] = CBORObject.FromObject(foo);
+                                fDirty = true;
+                            }
+                        }
+                        else {
+                            r.Add("KDF", foo);
+                            fDirty = true;
+                        }
+                    }
+                }
+
 
                 if (outputFormat == Outputs.cborDiag)     return UTF8Encoding.UTF8.GetBytes( msg.EncodeToCBORObject().ToString());
                 return msg.EncodeToBytes();
@@ -329,7 +473,7 @@ namespace examples
             }
         }
 
-        static byte[] ProcessMAC(Outputs outputFormat, CBORObject control)
+        static byte[] ProcessMAC(Outputs outputFormat, CBORObject control, ref bool fDirty)
         {
             CBORObject input = control["input"];
             CBORObject mac = input["mac"];
@@ -354,6 +498,32 @@ namespace examples
 
                 foreach (CBORObject recip in mac["recipients"].Values) {
                     msg.AddRecipient(GetRecipient(recip));
+                }
+
+                {
+                    string aad = Convert.ToBase64String(msg.BuildContentBytes());
+                    CBORObject intermediates;
+                    if (!input.ContainsKey("intermediates")) {
+                        intermediates = CBORObject.NewMap();
+                        input.Add("intermediates", intermediates);
+                        fDirty = true;
+                    }
+                    else {
+                        intermediates = input["intermediates"];
+                    }
+
+                    string aad_old;
+                    if (intermediates.ContainsKey("AAD")) {
+                        aad_old = intermediates["AAD"].AsString();
+                        if (aad_old != aad) {
+                            intermediates["AAD"] = CBORObject.FromObject(aad);
+                            fDirty = true;
+                        }
+                    }
+                    else {
+                        intermediates.Add("AAD", aad);
+                        fDirty = true;
+                    }
                 }
 
                 if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
@@ -416,6 +586,18 @@ namespace examples
                 case "apv_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyV_ID; goto binFromText;
                 case "supp_pub_other": cborKey = COSE.CoseKeyParameterKeys.HKDF_SuppPub_Other; goto binFromText;
                 case "spk_kid": cborKey = COSE.CoseKeyParameterKeys.ECDH_StaticKey_kid; goto binFromText;
+
+                case "IV": cborKey = COSE.HeaderKeys.IV; goto binFromText;
+                case "partialIV": cborKey = COSE.HeaderKeys.PartialIV; 
+                    if (cborValue.Type == CBORType.TextString) {
+                        cborValue = CBORObject.FromObject(UTF8Encoding.UTF8.GetBytes(cborValue.AsString()));
+                    }
+                    if (cborValue.Type == CBORType.ByteString) {
+                        byte[] bytes = cborValue.GetByteString();
+                        if (bytes.Length != 2) throw new Exception("Incorrect size for bytes->int");
+                        cborValue = CBORObject.FromObject(bytes[0] * 256 + bytes[1]);
+                    }
+                    break;
 
                 default:
                     break;
@@ -726,6 +908,7 @@ namespace examples
             case "ECDH-ES": return COSE.AlgorithmValues.ECDH_ES_HKDF_256;
             case "ECDH-SS": return COSE.AlgorithmValues.ECDH_SS_HKDF_256;
             case "ECDH-ES+A128KW": return COSE.AlgorithmValues.ECDH_ES_HKDF_256_AES_KW_128;
+            case "ECDH-SS+A128KW": return COSE.AlgorithmValues.ECDH_SS_HKDF_256_AES_KW_128;
 
             default: return old;
             }
