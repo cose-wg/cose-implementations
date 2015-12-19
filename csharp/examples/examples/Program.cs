@@ -127,6 +127,7 @@ namespace examples
                     byte[] result;
 
                     if (control["input"].ContainsKey("mac")) result = ProcessMAC(output, control, ref modified);
+                    else if (control["input"].ContainsKey("mac0")) result = ProcessMAC0(output, control, ref modified);
                     else if (control["input"].ContainsKey("enveloped")) result = ProcessEnveloped(output, control, ref modified);
                     else if (control["input"].ContainsKey("encrypted")) result = ProcessEncrypted(output, control, ref modified);
                     else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
@@ -553,6 +554,62 @@ namespace examples
             }
         }
 
+        static byte[] ProcessMAC0(Outputs outputFormat, CBORObject control, ref bool fDirty)
+        {
+            CBORObject input = control["input"];
+            CBORObject mac = input["mac0"];
+
+            COSE.MAC0Message msg = new COSE.MAC0Message();
+
+            msg.ForceArray(true);
+
+            if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+            msg.SetContent(input["plaintext"].AsString());
+
+            if (mac.ContainsKey("protected")) AddAttributes(msg, mac["protected"], 0);
+            if (mac.ContainsKey("unprotected")) AddAttributes(msg, mac["unprotected"], 1);
+            if (mac.ContainsKey("unsent")) AddAttributes(msg, mac["unsent"], 2);
+
+            if (!mac.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
+            //  Should check that this exists somewhere and has the correct value
+
+            if ((!mac.ContainsKey("recipients")) || (mac["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
+            if ((mac["recipients"].Count > 1) && (outputFormat == Outputs.jose_flatten)) throw new BadOutputException();
+
+            foreach (CBORObject recip in mac["recipients"].Values) {
+                msg.AddRecipient(GetRecipient(recip));
+            }
+
+            {
+                string aad = Convert.ToBase64String(msg.BuildContentBytes());
+                CBORObject intermediates;
+                if (!input.ContainsKey("intermediates")) {
+                    intermediates = CBORObject.NewMap();
+                    input.Add("intermediates", intermediates);
+                    fDirty = true;
+                }
+                else {
+                    intermediates = input["intermediates"];
+                }
+
+                string aad_old;
+                if (intermediates.ContainsKey("AAD")) {
+                    aad_old = intermediates["AAD"].AsString();
+                    if (aad_old != aad) {
+                        intermediates["AAD"] = CBORObject.FromObject(aad);
+                        fDirty = true;
+                    }
+                }
+                else {
+                    intermediates.Add("AAD", aad);
+                    fDirty = true;
+                }
+            }
+
+            if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
+            return msg.EncodeToBytes();
+        }
+
         static void AddAttributes(COSE.Attributes msg, CBORObject items, int destination)
         {
             foreach (CBORObject cborKey2 in items.Keys) {
@@ -588,7 +645,8 @@ namespace examples
                 case "spk_kid": cborKey = COSE.CoseKeyParameterKeys.ECDH_StaticKey_kid; goto binFromText;
 
                 case "IV": cborKey = COSE.HeaderKeys.IV; goto binFromText;
-                case "partialIV": cborKey = COSE.HeaderKeys.PartialIV; 
+                case "partialIV": cborKey = COSE.HeaderKeys.PartialIV; goto binFromText;
+#if false
                     if (cborValue.Type == CBORType.TextString) {
                         cborValue = CBORObject.FromObject(UTF8Encoding.UTF8.GetBytes(cborValue.AsString()));
                     }
@@ -598,6 +656,7 @@ namespace examples
                         cborValue = CBORObject.FromObject(bytes[0] * 256 + bytes[1]);
                     }
                     break;
+#endif
 
                 default:
                     break;
