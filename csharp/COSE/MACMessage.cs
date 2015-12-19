@@ -21,16 +21,72 @@ using System.Diagnostics;
 
 namespace COSE
 {
+
+    public class MAC0Message : MACMessage
+    {
+        public MAC0Message()
+        {
+            strContext = "MAC0";
+        }
+
+        public override void AddRecipient(Recipient recipient)
+        {
+            if (recipientList.Count != 0) throw new Exception("Can't have more than one recipient");
+            if (recipient.recipientType != RecipientType.direct) throw new Exception("Must be direct recipient");
+
+            recipient.SetContext("Mac0_Recipient");
+            recipientList.Add(recipient);
+        }
+
+        public override CBORObject EncodeToCBORObject()
+        {
+            CBORObject obj;
+            CBORObject obj3;
+
+            obj3 = Encode();
+
+            obj = CBORObject.NewArray();
+
+            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
+
+            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.MAC0);
+            return obj;
+        }
+
+        public override CBORObject Encode()
+        {
+            CBORObject obj;
+
+            if (rgbTag == null) MAC();
+
+            obj = CBORObject.NewArray();
+
+            if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
+            else obj.Add(new byte[0]);
+
+            if (objUnprotected.Count > 0) obj.Add(objUnprotected); // Add unprotected attributes
+            else obj.Add(CBORObject.NewMap());
+
+            obj.Add(rgbContent);      // Add ciphertext
+            obj.Add(rgbTag);
+
+            return obj;
+        }
+
+    }
+
     public class MACMessage : Message
     {
-        byte[] rgbTag;
-        byte[] rgbContent;
+        protected byte[] rgbTag;
+        protected byte[] rgbContent;
         byte[] external_aad = null;
+        protected string strContext = "MAC";
 
-        List<Recipient> recipientList = new List<Recipient>();
+        protected List<Recipient> recipientList = new List<Recipient>();
 
-        public void AddRecipient(Recipient recipient)
+        public virtual void AddRecipient(Recipient recipient)
         {
+            recipient.SetContext("Mac_Recipient");
             recipientList.Add(recipient);
         }
 
@@ -41,7 +97,7 @@ namespace COSE
             return obj.EncodeToBytes();
         }
 
-        public CBORObject EncodeToCBORObject()
+        public virtual CBORObject EncodeToCBORObject()
         {
             CBORObject obj;
             CBORObject obj3;
@@ -50,7 +106,6 @@ namespace COSE
 
 #if USE_ARRAY
             obj = CBORObject.NewArray();
-            obj.Add(3);  // Tag as an MAC item
 
             for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
 #else
@@ -59,30 +114,30 @@ namespace COSE
 
             foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
 #endif
-
+            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.MAC);
             return obj;
         }
 
-        public CBORObject Encode()
+        public virtual CBORObject Encode()
         {
             CBORObject obj;
             
-
             if (rgbTag == null) MAC();
 
 #if USE_ARRAY
             obj = CBORObject.NewArray();
+
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
-            else obj.Add(null);
+            else obj.Add(new byte[0]);
 
             if (objUnprotected.Count > 0) obj.Add(objUnprotected); // Add unprotected attributes
-            else obj.Add(null);
+            else obj.Add(CBORObject.NewMap());
 
             obj.Add(rgbContent);      // Add ciphertext
             obj.Add(rgbTag);
 
             if ((!m_forceArray) && (recipientList.Count == 1)) {
-                CBORObject recipient = recipientList[0].EncodeToCBORObject();
+                CBORObject recipient = recipientList[0].Encode();
 
                 for (int i = 0; i < recipient.Count; i++) {
                     obj.Add(recipient[i]);
@@ -92,7 +147,7 @@ namespace COSE
                 CBORObject recipients = CBORObject.NewArray();
 
                 foreach (Recipient key in recipientList) {
-                    recipients.Add(key.EncodeToCBORObject());
+                    recipients.Add(key.Encode());
                 }
                 obj.Add(recipients);
             }
@@ -210,10 +265,11 @@ namespace COSE
             return;
         }
 
-        private byte[] BuildContentBytes()
+        public byte[] BuildContentBytes()
         {
             CBORObject obj = CBORObject.NewArray();
 
+            obj.Add(strContext);
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
             else obj.Add(CBORObject.FromObject(new byte[0]));
             if (external_aad != null) obj.Add(CBORObject.FromObject(external_aad));
