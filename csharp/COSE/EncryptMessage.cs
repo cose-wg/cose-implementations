@@ -37,6 +37,11 @@ namespace COSE
         protected byte[] rgbContent;
         byte[] extern_aad = new byte[0];
 
+        public EnvelopeMessage()
+        {
+            m_tag = Tags.Enveloped;
+        }
+
         public List<Recipient> RecipientList
         {
             get { return recipientList; }
@@ -72,7 +77,9 @@ namespace COSE
 
             // Cipher Text
             if (obj[index + 2].Type == CBORType.ByteString) rgbEncrypted = obj[index + 3].GetByteString();
-            else if (obj[index + 2].IsNull) ; // Detached content - will need to get externally
+            else if (!obj[index + 2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid Encryption Structure");
+            }
 
             // Recipients
             if (obj[index + 3].IsNull && (size == 5)) ; // No Recipient structures - this is just fine
@@ -134,38 +141,8 @@ namespace COSE
 #endif
         }
 
-        override public byte[] EncodeToBytes()
-        {
-            CBORObject obj;
 
-            obj = EncodeToCBORObject();
-
-            return obj.EncodeToBytes();
-        }
-
-        public virtual CBORObject EncodeToCBORObject()
-        {
-            CBORObject obj3;
-
-#if USE_ARRAY
-            obj = CBORObject.NewArray();
-#else
-            obj = CBORObject.NewMap();
-            obj.Add(RecordKeys.MsgType, 2);
-#endif
-
-            obj3 = Encode();
-
-#if USE_ARRAY
-            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
-#else
-            foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
-#endif
-            if (m_useTag) return  CBORObject.FromObjectAndTag(obj, (int) Tags.Enveloped);
-            return obj;
-        }
-
-        public virtual CBORObject Encode()
+        public override CBORObject Encode()
         {
             CBORObject obj;
             
@@ -351,6 +328,11 @@ namespace COSE
                     ContentKey = AES_CCM(alg, ContentKey);
                     break;
 
+#if false
+                case AlgorithmValuesInt.ChaCha20_Poly1305:
+                    ContentKey = ChaCha20_Poly1305(alg, ContentKey);
+                    break;
+#endif
 
                 default:
                     throw new CoseException("Content encryption algorithm is not recognized");
@@ -553,6 +535,70 @@ namespace COSE
 
             return K;
         }
+
+#if false
+        private byte[] ChaCha20_Poly1305(CBORObject alg, byte[] K)
+        {
+            ChaChaEngine cipher = new ChaChaEngine();
+            Poly1305 poly = new Poly1305();
+
+            KeyParameter ContentKey;
+            int cbitTag = 64;
+
+            //  The requirements from JWA
+            //  IV is 96 bits
+            //  Authentication tag is 128 bits
+            //  key sizes are 128, 192 and 256 bits
+
+            byte[] IV = new byte[96 / 8];
+            CBORObject cbor = FindAttribute(HeaderKeys.IV);
+            if (cbor != null) {
+                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorreclty formed.");
+                if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
+                Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
+            }
+            else {
+                s_PRNG.NextBytes(IV);
+                AddUnprotected(HeaderKeys.IV, CBORObject.FromObject(IV));
+            }
+
+            if (K == null) {
+                Debug.Assert(alg.Type == CBORType.Number);
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.ChaCha20_Poly1305:
+                    K = new byte[256 / 8];
+                    cbitTag = 128;
+                    break;
+
+                default:
+                    throw new CoseException("Unsupported algorithm: " + alg);
+                }
+                s_PRNG.NextBytes(K);
+            }
+
+            //  Generate Poly1305 key
+
+            KeyParameter polyKey = cipher(Key, coutunter, nonce);
+
+            ContentKey = new KeyParameter(K);
+
+            //  Build the object to be hashed
+
+            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, getAADBytes());
+
+            cipher.Init(true, parameters);
+
+            byte[] C = new byte[cipher.GetOutputSize(rgbContent.Length)];
+            int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
+            len += cipher.DoFinal(C, len);
+
+            Array.Resize(ref C, C.Length - (128 / 8) + (cbitTag / 8));
+            rgbEncrypted = C;
+
+            return K;
+
+        }
+#endif
 
         public byte[] getAADBytes()
         {
@@ -1551,6 +1597,7 @@ namespace COSE
         public EncryptMessage() : base()
         {
             SetContext("Encrypt");
+            m_tag = Tags.Encrypted;
         }
 
         public override CBORObject Encode()
@@ -1583,27 +1630,5 @@ namespace COSE
 
             return obj;
         }
-        public override CBORObject EncodeToCBORObject()
-        {
-            CBORObject obj3;
-
-#if USE_ARRAY
-            obj = CBORObject.NewArray();
-#else
-            obj = CBORObject.NewMap();
-            obj.Add(RecordKeys.MsgType, 2);
-#endif
-
-            obj3 = Encode();
-
-#if USE_ARRAY
-            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
-#else
-            foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
-#endif
-            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.Encrypted);
-            return obj;
-        }
-
     }
 }

@@ -131,6 +131,7 @@ namespace examples
                     else if (control["input"].ContainsKey("enveloped")) result = ProcessEnveloped(output, control, ref modified);
                     else if (control["input"].ContainsKey("encrypted")) result = ProcessEncrypted(output, control, ref modified);
                     else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
+                    else if (control["input"].ContainsKey("sign0")) result = ProcessSign0(output, control);
                     else throw new Exception("Unknown operation in control");
 
                     switch (output) {
@@ -271,6 +272,32 @@ namespace examples
                 if (outputFormat == Outputs.jose_compact) return UTF8Encoding.UTF8.GetBytes(msg.EncodeCompact());
                 return UTF8Encoding.UTF8.GetBytes(msg.Encode());
             }
+        }
+
+        static byte[] ProcessSign0(Outputs outputFormat, CBORObject control)
+        {
+            CBORObject input = control["input"];
+            CBORObject sign = input["sign0"];
+
+            COSE.Sign0Message msg = new COSE.Sign0Message();
+
+            msg.ForceArray(true);
+
+            if (!input.ContainsKey("plaintext")) throw new Exception("missing plaintext field");
+            msg.SetContent(input["plaintext"].AsString());
+
+            if (!sign.ContainsKey("alg")) throw new Exception("Signer missing alg field");
+
+            COSE.Key key = GetKey(sign["key"]);
+
+            msg.AddSigner(key, AlgorithmMap(sign["alg"]));
+
+            if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], 0);
+            if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], 1);
+            if (sign.ContainsKey("unsent")) AddAttributes(msg, sign["unsent"], 2);
+
+            if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
+            return msg.EncodeToBytes();
         }
 
         static byte[] ProcessEncrypted(Outputs outputFormat, CBORObject control, ref bool fDirty)
@@ -504,13 +531,13 @@ namespace examples
                 {
                     string aad = Convert.ToBase64String(msg.BuildContentBytes());
                     CBORObject intermediates;
-                    if (!input.ContainsKey("intermediates")) {
+                    if (!control.ContainsKey("intermediates")) {
                         intermediates = CBORObject.NewMap();
-                        input.Add("intermediates", intermediates);
+                        control.Add("intermediates", intermediates);
                         fDirty = true;
                     }
                     else {
-                        intermediates = input["intermediates"];
+                        intermediates = control["intermediates"];
                     }
 
                     string aad_old;
@@ -583,13 +610,13 @@ namespace examples
             {
                 string aad = Convert.ToBase64String(msg.BuildContentBytes());
                 CBORObject intermediates;
-                if (!input.ContainsKey("intermediates")) {
+                if (!control.ContainsKey("intermediates")) {
                     intermediates = CBORObject.NewMap();
-                    input.Add("intermediates", intermediates);
+                    control.Add("intermediates", intermediates);
                     fDirty = true;
                 }
                 else {
-                    intermediates = input["intermediates"];
+                    intermediates = control["intermediates"];
                 }
 
                 string aad_old;

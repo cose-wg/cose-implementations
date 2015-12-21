@@ -27,6 +27,7 @@ namespace COSE
         public MAC0Message()
         {
             strContext = "MAC0";
+            m_tag = Tags.MAC0;
         }
 
         public override void AddRecipient(Recipient recipient)
@@ -36,21 +37,6 @@ namespace COSE
 
             recipient.SetContext("Mac0_Recipient");
             recipientList.Add(recipient);
-        }
-
-        public override CBORObject EncodeToCBORObject()
-        {
-            CBORObject obj;
-            CBORObject obj3;
-
-            obj3 = Encode();
-
-            obj = CBORObject.NewArray();
-
-            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
-
-            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.MAC0);
-            return obj;
         }
 
         public override CBORObject Encode()
@@ -82,6 +68,11 @@ namespace COSE
         byte[] external_aad = null;
         protected string strContext = "MAC";
 
+        public MACMessage()
+        {
+            m_tag = Tags.MAC;
+        }
+
         protected List<Recipient> recipientList = new List<Recipient>();
 
         public virtual void AddRecipient(Recipient recipient)
@@ -90,35 +81,8 @@ namespace COSE
             recipientList.Add(recipient);
         }
 
-        override public byte[] EncodeToBytes()
-        {
-            CBORObject obj = EncodeToCBORObject();
-
-            return obj.EncodeToBytes();
-        }
-
-        public virtual CBORObject EncodeToCBORObject()
-        {
-            CBORObject obj;
-            CBORObject obj3;
-
-            obj3 = Encode();
-
-#if USE_ARRAY
-            obj = CBORObject.NewArray();
-
-            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
-#else
-            obj = CBORObject.NewMap();
-            obj.Add(RecordKeys.MsgType, 3);  // Tag as an MAC item
-
-            foreach (CBORObject key in obj3.Keys) obj.Add(key, obj3[key]);
-#endif
-            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) Tags.MAC);
-            return obj;
-        }
-
-        public virtual CBORObject Encode()
+ 
+        public override CBORObject Encode()
         {
             CBORObject obj;
             
