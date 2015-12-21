@@ -19,19 +19,13 @@ using Org.BouncyCastle.Security;
 
 namespace COSE
 {
-    public class SignMessage : Message
+    public class Sign0Message : Message
     {
-        List<Signer> signerList = new List<Signer>();
         byte[] rgbContent;
 
-        public SignMessage()
+        public Sign0Message()
         {
-            m_tag = Tags.Signed;
-        }
-
-        public void AddSigner(Signer sig)
-        {
-            signerList.Add(sig);
+            m_tag = Tags.Signed0;
         }
 
         public byte[] BEncodeToBytes()
@@ -63,11 +57,11 @@ namespace COSE
             return obj;
         }
 
+
         public override CBORObject Encode()
         {
             CBORObject obj;
 
-#if USE_ARRAY
             obj = CBORObject.NewArray();
 
             if ((objProtected != null) && (objProtected.Count > 0)) {
@@ -80,47 +74,9 @@ namespace COSE
 
             obj.Add(rgbContent);
 
-            if ((signerList.Count == 1) && !this.m_forceArray) {
-                CBORObject recipient = signerList[0].EncodeToCBORObject(obj[0], rgbContent);
+                PerformSignature();
 
-                for (int i = 0; i < recipient.Count; i++) {
-                    obj.Add(recipient[i]);
-                }
-            }
-            else if (signerList.Count > 0) {
-                CBORObject signers = CBORObject.NewArray();
-
-                foreach (Signer key in signerList) {
-                    signers.Add(key.EncodeToCBORObject(obj[0], rgbContent));
-                }
-                obj.Add(signers);
-            }
-            else {
-                obj.Add(null);      // No recipients - set to null
-            }
-#else
-            obj = CBORObject.NewMap();
-
-            CBORObject cborProtected = CBORObject.Null;
-            if ((objProtected != null) && (objProtected.Count > 0)) {
-                byte[] rgb = objProtected.EncodeToBytes();
-                obj.Add(RecordKeys.Protected,  rgb);
-                cborProtected = CBORObject.FromObject(rgb);
-            }
-
-            if ((objUnprotected != null) && (objUnprotected.Count > 0))  obj.Add(RecordKeys.Unprotected, objUnprotected); // Add unprotected attributes
-
-            obj.Add(RecordKeys.Payload, rgbContent);
-
-            if (signerList.Count > 0) {
-                CBORObject signers = CBORObject.NewArray();
-
-                foreach (Signer key in signerList) {
-                    signers.Add(key.EncodeToCBORObject(cborProtected, rgbContent));
-                }
-                obj.Add(RecordKeys.Signatures, signers);
-            }
-#endif
+            obj.Add(rgbSignature);
             return obj;
         }
 
@@ -134,15 +90,11 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
-    }
-
-    public class Signer : Attributes
-    {
         Key keyToSign;
         byte[] rgbSignature = null;
-        protected string context = "Signature";
+        protected string context = "Signature0";
 
-        public Signer(Key key, CBORObject algorithm = null)
+        public void AddSigner(Key key, CBORObject algorithm = null)
         {
             if (algorithm != null) AddAttribute(HeaderKeys.Algorithm, algorithm, false);
             if (key.ContainsName(CoseKeyKeys.KeyIdentifier)) AddUnprotected(HeaderKeys.KeyId, key[CoseKeyKeys.KeyIdentifier]);
@@ -172,60 +124,24 @@ namespace COSE
             keyToSign = key;
         }
 
-        public CBORObject EncodeToCBORObject()
-        {
-            if (rgbSignature == null) {
-                throw new Exception("Must be signed already to use this function call");
-            }
-            return EncodeToCBORObject(null, null);
-        }
 
-        public CBORObject EncodeToCBORObject(CBORObject bodyAttributes, byte[] body)
+        public void PerformSignature()
         {
-#if USE_ARRAY
-            CBORObject obj = CBORObject.NewArray();
-
             CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
             if ((objProtected != null) && (objProtected.Count > 0)) {
                 byte[] rgb = objProtected.EncodeToBytes();
                 cborProtected = CBORObject.FromObject(rgb);
             }
-            obj.Add(cborProtected);
-
-            if ((objUnprotected == null)) obj.Add(CBORObject.NewMap());
-            else obj.Add(objUnprotected); // Add unprotected attributes
 
             if (rgbSignature == null) {
                 CBORObject signObj = CBORObject.NewArray();
                 signObj.Add(context);
-                signObj.Add(bodyAttributes);
                 signObj.Add(cborProtected);
                 signObj.Add(new byte[0]); // External AAD
-                signObj.Add(body);
+                signObj.Add(rgbContent);
 
                 rgbSignature = Sign(signObj.EncodeToBytes());
             }
-            obj.Add(rgbSignature);
-#else
-            CBORObject obj = CBORObject.NewMap();
-
-            CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
-            if ((objProtected != null) && (objProtected.Count > 0)) {
-                byte[] rgb = objProtected.EncodeToBytes();
-                obj.Add(RecordKeys.Protected, rgb);
-                cborProtected = CBORObject.FromObject(rgb);
-            }
-            if ((objUnprotected != null) && (objUnprotected.Count > 0)) obj.Add(RecordKeys.Unprotected, objUnprotected); // Add unprotected attributes
-
-            CBORObject signObj = CBORObject.NewArray();
-            signObj.Add(bodyAttributes);
-            signObj.Add(cborProtected);
-            signObj.Add(new byte[0]); // External AAD
-            signObj.Add(body);
-
-            obj.Add(RecordKeys.Signature, Sign(signObj.EncodeToBytes()));
-#endif
-            return obj;
         }
 
         private byte[] Sign(byte[] bytesToBeSigned)
@@ -410,52 +326,5 @@ namespace COSE
             return new Org.BouncyCastle.Math.BigInteger(rgb2);
         }
 
-    }
-
-    public class CounterSignature : Signer
-    {
-        Message m_msgToSign = null;
-        Signer m_signerToSign = null;
-
-        public CounterSignature(Key key, CBORObject algorithm = null) : base(key, algorithm)
-        {
-            context = "CounterSignature";
-        }
-
-        public void SetObject(Message msg)
-        {
-            m_msgToSign = msg;    
-        }
-
-        public void SetObject(Signer signer)
-        {
-            m_signerToSign = signer;
-        }
-
-        new public CBORObject EncodeToCBORObject()
-        {
-            CBORObject cborBodyAttributes = null;
-            byte[] rgbBody = null;
-
-            if (m_msgToSign != null) {
-                if (m_msgToSign.GetType() == typeof(EnvelopeMessage)) {
-                    EnvelopeMessage msg = (EnvelopeMessage) m_msgToSign;
-                    msg.Encrypt();
-                    CBORObject obj = msg.EncodeToCBORObject();
-                    if (obj[1].Type != CBORType.ByteString) throw new Exception("Internal error");
-                    if (obj[3].Type != CBORType.ByteString) throw new Exception("Internal error");
-                    rgbBody = obj[3].GetByteString();
-                    cborBodyAttributes = obj[1];
-                }
-            }
-            else if (m_signerToSign != null) {
-               CBORObject obj = m_signerToSign.EncodeToCBORObject();
-
-
-            }
-
-
-            return base.EncodeToCBORObject(cborBodyAttributes, rgbBody);
-        }
     }
 }

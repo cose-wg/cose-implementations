@@ -13,7 +13,7 @@ namespace COSE
 
     public enum Tags
     { 
-        Encrypted = 993, Enveloped =992,Signed = 991, MAC = 994, MAC0=996
+        Encrypted = 993, Enveloped =992,Signed = 991, MAC = 994, MAC0=996, Signed0=997
     }
 
     public class RecordKeys
@@ -45,6 +45,7 @@ namespace COSE
     { 
         AES_GCM_128=1, AES_GCM_192=2, AES_GCM_256=3,
         HMAC_SHA_256_64=99, HMAC_SHA_256=4, HMAC_SHA_384=5, HMAC_SHA_512=6,
+        ChaCha20_Poly1305=24,
         AES_CCM_16_64_128=10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
         AES_CCM_16_128_128=12, AES_CCM_16_128_256=13, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
         RSA_OAEP = -25, RSA_OAEP_256 = -26,
@@ -72,6 +73,8 @@ namespace COSE
         static public readonly CBORObject AES_CMAC_256_64 = CBORObject.FromObject("AES-CMAC-256/64");
 
         static public readonly CBORObject AES_CCM_16_64_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_64_128);
+
+        static public readonly CBORObject ChaCha20_Poly1305 = CBORObject.FromObject(AlgorithmValuesInt.ChaCha20_Poly1305);
 
         static public readonly CBORObject RSA_OAEP = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP);
         static public readonly CBORObject RSA_OAEP_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_OAEP_256);
@@ -167,6 +170,7 @@ namespace COSE
         protected List<COSE.Signer> m_counterSignerList = new List<Signer>();
         protected static SecureRandom s_PRNG = null;
         protected bool m_useTag = true;
+        protected Tags m_tag;
 
         public static SecureRandom GetPRNG()
         {
@@ -196,7 +200,14 @@ namespace COSE
             }
         }
 
-        abstract public byte[] EncodeToBytes();
+        public byte[] EncodeToBytes()
+        {
+            CBORObject obj3;
+
+            obj3 = EncodeToCBORObject();
+
+            return obj3.EncodeToBytes();
+        }
 
         public void ForceArray(bool f)
         {
@@ -213,7 +224,26 @@ namespace COSE
         {
             m_counterSignerList.Add(signer);
         }
+
+        public CBORObject EncodeToCBORObject()
+        {
+            CBORObject obj;
+            CBORObject obj3;
+
+            obj = CBORObject.NewArray();
+
+            obj3 = Encode();
+
+            for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
+
+            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) m_tag);
+            return obj;
+        }
+
+        public abstract CBORObject Encode();
     }
+
+
 
     public class Attributes
     {
