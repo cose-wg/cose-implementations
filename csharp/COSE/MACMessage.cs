@@ -74,6 +74,7 @@ namespace COSE
         }
 
         protected List<Recipient> recipientList = new List<Recipient>();
+        public List<Recipient> RecipientList { get { return recipientList; } }
 
         public virtual void AddRecipient(Recipient recipient)
         {
@@ -155,7 +156,7 @@ namespace COSE
             external_aad = bytes;
         }
 
-        protected virtual void MAC()
+        public  virtual void MAC()
         {
             CBORObject alg;
 
@@ -225,6 +226,10 @@ namespace COSE
                 key.SetContent(ContentKey);
                 key.Encrypt();
             }
+
+#if FOR_EXAMPLES
+            m_cek = ContentKey;
+#endif
 
             return;
         }
@@ -406,5 +411,9 @@ namespace COSE
             return K;
         }
 
+#if FOR_EXAMPLES
+        byte[] m_cek= null;
+        public byte[] getCEK() { return m_cek; }
+#endif
     }
 }

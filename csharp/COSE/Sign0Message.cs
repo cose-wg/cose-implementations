@@ -141,6 +141,10 @@ namespace COSE
                 signObj.Add(rgbContent);
 
                 rgbSignature = Sign(signObj.EncodeToBytes());
+
+#if FOR_EXAMPLES
+                m_toBeSigned = signObj.EncodeToBytes();
+#endif
             }
         }
 
@@ -326,5 +330,9 @@ namespace COSE
             return new Org.BouncyCastle.Math.BigInteger(rgb2);
         }
 
+#if FOR_EXAMPLES
+        byte[] m_toBeSigned = null;
+        public byte[] GetToBeSigned() { return m_toBeSigned; }
+#endif
     }
 }

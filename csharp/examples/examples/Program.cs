@@ -130,8 +130,8 @@ namespace examples
                     else if (control["input"].ContainsKey("mac0")) result = ProcessMAC0(output, control, ref modified);
                     else if (control["input"].ContainsKey("enveloped")) result = ProcessEnveloped(output, control, ref modified);
                     else if (control["input"].ContainsKey("encrypted")) result = ProcessEncrypted(output, control, ref modified);
-                    else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control);
-                    else if (control["input"].ContainsKey("sign0")) result = ProcessSign0(output, control);
+                    else if (control["input"].ContainsKey("sign")) result = ProcessSign(output, control, ref modified);
+                    else if (control["input"].ContainsKey("sign0")) result = ProcessSign0(output, control, ref modified);
                     else throw new Exception("Unknown operation in control");
 
                     switch (output) {
@@ -227,7 +227,7 @@ namespace examples
             return modified;
         }
 
-        static byte[] ProcessSign(Outputs outputFormat, CBORObject control)
+        static byte[] ProcessSign(Outputs outputFormat, CBORObject control, ref bool fDirty)
         {
             CBORObject input = control["input"];
             CBORObject sign = input["sign"];
@@ -247,6 +247,19 @@ namespace examples
                 if ((!sign.ContainsKey("signers")) || (sign["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 foreach (CBORObject recip in sign["signers"].Values) {
                     msg.AddSigner(GetSigner(recip));
+                }
+
+                if (outputFormat == Outputs.cborDiag) {
+                    msg.Encode();
+
+                    CBORObject signers = GetSection(GetSection(control, "intermediates"), "signers");
+
+                  for (int iSigner = 0; iSigner < msg.SignerList.Count; iSigner++) {
+                        CBORObject sig = signers[iSigner];
+
+                        SetField(signers[iSigner], "ToBeSign_hex", msg.SignerList[iSigner].GetToBeSigned(), ref fDirty);
+                    }  
+
                 }
 
                 if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
@@ -274,7 +287,7 @@ namespace examples
             }
         }
 
-        static byte[] ProcessSign0(Outputs outputFormat, CBORObject control)
+        static byte[] ProcessSign0(Outputs outputFormat, CBORObject control, ref bool fDirty)
         {
             CBORObject input = control["input"];
             CBORObject sign = input["sign0"];
@@ -295,6 +308,13 @@ namespace examples
             if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], 0);
             if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], 1);
             if (sign.ContainsKey("unsent")) AddAttributes(msg, sign["unsent"], 2);
+
+            if (outputFormat == Outputs.cborDiag) {
+                msg.Encode();
+
+                    SetField(GetSection(control, "intermediates"), "ToBeSign_hex", msg.GetToBeSigned(), ref fDirty);
+
+            }
 
             if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
             return msg.EncodeToBytes();
@@ -327,29 +347,12 @@ namespace examples
                 }
 
                 {
-                    string aad = Convert.ToBase64String(msg.getAADBytes());
-                    CBORObject intermediates;
-                    if (!control.ContainsKey("intermediates")) {
-                        intermediates = CBORObject.NewMap();
-                        control.Add("intermediates", intermediates);
-                        fDirty = true;
-                    }
-                    else {
-                        intermediates = control["intermediates"];
-                    }
+                    msg.Encrypt();
 
-                    string aad_old;
-                    if (intermediates.ContainsKey("AAD")) {
-                        aad_old = intermediates["AAD"].AsString();
-                        if (aad_old != aad) {
-                            intermediates["AAD"] = CBORObject.FromObject( aad);
-                            fDirty = true;
-                        }
-                    }
-                    else {
-                        intermediates.Add("AAD", aad);
-                        fDirty = true;
-                    }
+                    CBORObject intermediates = GetSection(control, "intermediates");
+
+                    SetField(intermediates, "AAD_hex", msg.getAADBytes(), ref fDirty);
+                    SetField(intermediates, "CEK_hex", msg.getCEK(), ref fDirty);
                 }
 
                 if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
@@ -503,28 +506,34 @@ namespace examples
                 }
 
                 {
-                    string aad = Convert.ToBase64String(msg.BuildContentBytes());
-                    CBORObject intermediates;
-                    if (!control.ContainsKey("intermediates")) {
-                        intermediates = CBORObject.NewMap();
-                        control.Add("intermediates", intermediates);
-                        fDirty = true;
-                    }
-                    else {
-                        intermediates = control["intermediates"];
-                    }
+                    msg.MAC();
 
-                    string aad_old;
-                    if (intermediates.ContainsKey("AAD")) {
-                        aad_old = intermediates["AAD"].AsString();
-                        if (aad_old != aad) {
-                            intermediates["AAD"] = CBORObject.FromObject(aad);
-                            fDirty = true;
+                    CBORObject intermediates = GetSection(control, "intermediates");
+
+                    SetField(intermediates, "ToMac_hex", msg.BuildContentBytes(), ref fDirty);
+                    SetField(intermediates, "CEK_hex", msg.getCEK(), ref fDirty);
+
+                    CBORObject rList = GetSection(intermediates, "recipients");
+
+                    for (int iRecipient = 0; iRecipient < msg.RecipientList.Count; iRecipient++) {
+                        COSE.Recipient r = msg.RecipientList[iRecipient];
+
+                        SetField(rList[iRecipient], "Context_hex", r.getContext(), ref fDirty);
+                        SetField(rList[iRecipient], "Secret_hex", r.getSecret(), ref fDirty);
+                        SetField(rList[iRecipient], "KEK_hex", r.getKEK(), ref fDirty);
+
+                        if (r.RecipientList.Count > 0) {
+                            CBORObject rList2 = GetSection(rList[iRecipient], "recipients");
+
+                            for (int iRecipient2 = 0; iRecipient2 < r.RecipientList.Count; iRecipient2++) {
+                                COSE.Recipient r2 = r.RecipientList[iRecipient2];
+
+                                SetField(rList2[iRecipient2], "Context_hex", r2.getContext(), ref fDirty);
+                                SetField(rList2[iRecipient2], "Secret_hex", r2.getSecret(), ref fDirty);
+                                SetField(rList2[iRecipient2], "KEK_hex", r2.getKEK(), ref fDirty);
+
+                            }
                         }
-                    }
-                    else {
-                        intermediates.Add("AAD", aad);
-                        fDirty = true;
                     }
                 }
 
@@ -582,29 +591,12 @@ namespace examples
             }
 
             {
-                string aad = Convert.ToBase64String(msg.BuildContentBytes());
-                CBORObject intermediates;
-                if (!control.ContainsKey("intermediates")) {
-                    intermediates = CBORObject.NewMap();
-                    control.Add("intermediates", intermediates);
-                    fDirty = true;
-                }
-                else {
-                    intermediates = control["intermediates"];
-                }
+                msg.MAC();
 
-                string aad_old;
-                if (intermediates.ContainsKey("AAD")) {
-                    aad_old = intermediates["AAD"].AsString();
-                    if (aad_old != aad) {
-                        intermediates["AAD"] = CBORObject.FromObject(aad);
-                        fDirty = true;
-                    }
-                }
-                else {
-                    intermediates.Add("AAD", aad);
-                    fDirty = true;
-                }
+                CBORObject intermediates = GetSection(control, "intermediates");
+
+                SetField(intermediates, "ToMac_hex", msg.BuildContentBytes(), ref fDirty);
+                SetField(intermediates, "CEK_hex", msg.getCEK(), ref fDirty);
             }
 
             if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
