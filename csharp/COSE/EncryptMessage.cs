@@ -37,6 +37,10 @@ namespace COSE
         protected byte[] rgbContent;
         byte[] extern_aad = new byte[0];
 
+#if FOR_EXAMPLES
+        byte[] m_cek;
+#endif // FOR_EXAMPLES
+
         public EnvelopeMessage()
         {
             m_tag = Tags.Enveloped;
@@ -345,6 +349,10 @@ namespace COSE
                 key.Encrypt();
             }
 
+#if FOR_EXAMPLES
+            m_cek = ContentKey;
+#endif // FOR_EXAMPLES
+
             return;
         }
 
@@ -600,6 +608,7 @@ namespace COSE
         }
 #endif
 
+#if FOR_EXAMPLES
         public byte[] getAADBytes()
         {
             CBORObject obj = CBORObject.NewArray();
@@ -610,6 +619,12 @@ namespace COSE
 
             return obj.EncodeToBytes();
         }
+
+        public byte[] getCEK()
+        {
+            return this.m_cek;
+        }
+#endif // FOR_EXAMPLES
     }
 
     public enum RecipientType
@@ -823,24 +838,24 @@ namespace COSE
 
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    return KDF(rgbSecret, cbitCEK, algCEK);
+                    return HKDF(rgbSecret, cbitCEK, algCEK, new Sha256Digest());
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 128, alg);
+                    rgbKey = HKDF(rgbSecret, 128, alg, new Sha256Digest());
                     return AES_KeyUnwrap(null, 128, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
+                    rgbKey = HKDF(rgbSecret, 192, alg, new Sha256Digest());
                     return AES_KeyUnwrap(null, 192, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = KDF(rgbSecret, 256, alg);
+                    rgbKey = HKDF(rgbSecret, 256, alg, new Sha256Digest());
                     return AES_KeyUnwrap(null, 256, rgbKey);
 
                 default:
@@ -875,6 +890,9 @@ namespace COSE
                         if ((recipientTypes & 1) != 0) throw new CoseException("It is not legal to have two direct recipients in a message");
                         recipientTypes |= 1;
                         rgbKey = key.GetKey(alg);
+#if FOR_EXAMPLES
+                        m_kek = rgbKey;
+#endif
                         break;
 
                     default:
@@ -968,7 +986,10 @@ namespace COSE
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     ECDH_GenerateEphemeral();
                     rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 128, alg);
+                    rgbKey = HKDF(rgbSecret, 128, alg, new Sha256Digest());
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
                     AES_KeyWrap(128, rgbKey);
                     break;
 
@@ -976,23 +997,32 @@ namespace COSE
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     ECDH_GenerateEphemeral();
                     rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 192, alg);
+                    rgbKey = HKDF(rgbSecret, 192, alg, new Sha256Digest());
                     AES_KeyWrap(192, rgbKey);
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
                     break;
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorithm");
                     ECDH_GenerateEphemeral();
                     rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 256, alg);
+                    rgbKey = HKDF(rgbSecret, 256, alg, new Sha256Digest());
                     AES_KeyWrap(256, rgbKey);
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
                     break;
 
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     if (rgbKey != null) throw new CoseException("Can't wrap around this algorith");
                     rgbSecret = ECDH_GenerateSecret(m_key);
-                    rgbKey = KDF(rgbSecret, 128, alg);
+                    rgbKey = HKDF(rgbSecret, 128, alg, new Sha256Digest());
                     AES_KeyWrap(128, rgbKey);
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
                     break;
 
                 case AlgorithmValuesInt.RSA_OAEP:
@@ -1103,7 +1133,7 @@ namespace COSE
 
                         byte[] rgbSecret = ECDH_GenerateSecret(m_key);
 
-                        return KDF(rgbSecret, cbitKey, alg);
+                        return HKDF(rgbSecret, cbitKey, alg, new Sha256Digest());
                     }
 
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256:
@@ -1115,7 +1145,7 @@ namespace COSE
                             AddUnprotected("apu", CBORObject.FromObject(rgbAPU));
                         }
                         byte[] rgbSecret = ECDH_GenerateSecret(m_key);
-                        return KDF(rgbSecret, cbitKey, alg);
+                        return HKDF(rgbSecret, cbitKey, alg, new Sha256Digest());
                     }
 
 
@@ -1330,6 +1360,10 @@ namespace COSE
 
             BigInteger k1 = e1.CalculateAgreement(pub);
 
+#if FOR_EXAMPLES
+            m_secret = k1.ToByteArrayUnsigned();
+#endif
+
             return k1.ToByteArrayUnsigned();
         }
 
@@ -1375,6 +1409,10 @@ namespace COSE
             //  Fifth element is - Supplimental Private Info
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_SuppPriv_Other);
             if (obj != null) contextArray.Add(obj);
+
+#if FOR_EXAMPLES
+            m_context = contextArray.EncodeToBytes();
+#endif
 
             return contextArray.EncodeToBytes();
         }
@@ -1428,7 +1466,7 @@ namespace COSE
             return rgbOut;
         }
 
-
+#if false
         private byte[] KDF(byte[] secret, int cbitKey, CBORObject algorithmID)
         {
 #if USE_OLD_KDF
@@ -1534,6 +1572,7 @@ namespace COSE
             return rgbResult;
 #endif
         }
+#endif
 
         public static byte[] PBKF2(byte[] password, byte[] salt, int iterCount, int cOctets, IDigest digest)
         {
@@ -1589,7 +1628,20 @@ namespace COSE
             Array.Copy(rgbOutput, rgbOut, cOctets);
             return rgbOut;
         }
- 
+
+#if FOR_EXAMPLES
+        byte[] m_kek = null;
+        byte[] m_secret = null;
+        byte[] m_context = null;
+
+        public byte[] getKEK()
+        {
+            return m_kek;
+        }
+
+        public byte[] getSecret() { return m_secret; }
+        public byte[] getContext() { return m_context; }
+#endif // FOR_EXAMPLES
     }
 
     public class EncryptMessage : EnvelopeMessage

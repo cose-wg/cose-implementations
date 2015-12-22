@@ -413,57 +413,31 @@ namespace examples
                 if (outputFormat == Outputs.cborDiag) {
                     msg.Encrypt();
 
-                    string aad = Convert.ToBase64String(msg.getAADBytes());
-                    CBORObject intermediates;
-                    if (!control.ContainsKey("intermediates")) {
-                        intermediates = CBORObject.NewMap();
-                        control.Add("intermediates", intermediates);
-                        fDirty = true;
-                    }
-                    else {
-                        intermediates = control["intermediates"];
-                    }
+                    CBORObject intermediates = GetSection(control, "intermediates");
 
-                    string aad_old;
-                    if (intermediates.ContainsKey("AAD")) {
-                        aad_old = intermediates["AAD"].AsString();
-                        if (aad_old != aad) {
-                            intermediates["AAD"] = CBORObject.FromObject(aad);
-                            fDirty = true;
-                        }
-                    }
-                    else {
-                        intermediates.Add("AAD", aad);
-                        fDirty = true;
-                    }
+                    SetField(intermediates, "AAD_hex", msg.getAADBytes(), ref fDirty);
+                    SetField(intermediates, "CEK_hex", msg.getCEK(), ref fDirty);
 
-                    CBORObject rList;
-                    if (intermediates.ContainsKey("recipients")) rList = intermediates["recipients"];
-                    else {
-                        rList = CBORObject.NewArray();
-                        intermediates.Add("recipients", rList);
-                        fDirty = true;
-                    }
+                    CBORObject rList = GetSection(intermediates, "recipients");
 
                     for (int iRecipient = 0; iRecipient < msg.RecipientList.Count; iRecipient++) {
-                        string foo = Convert.ToBase64String(msg.RecipientList[iRecipient].GetKDFInput(255, msg.FindAttribute(COSE.HeaderKeys.Algorithm)));
-                        CBORObject r;
-                        if (rList.Count <= iRecipient) {
-                            r = CBORObject.NewMap();
-                            rList.Add(r);
-                            fDirty = true;
-                        }
-                        else r = rList[iRecipient];
-            
-                        if (r.ContainsKey("KDF")) {
-                            if (foo != r["KDF"].AsString()) {
-                                r["KDF"] = CBORObject.FromObject(foo);
-                                fDirty = true;
+                        COSE.Recipient r = msg.RecipientList[iRecipient];
+
+                        SetField(rList[iRecipient], "Context_hex", r.getContext(), ref fDirty);
+                        SetField(rList[iRecipient], "Secret_hex", r.getSecret(), ref fDirty);
+                        SetField(rList[iRecipient], "KEK_hex", r.getKEK(), ref fDirty);
+
+                        if (r.RecipientList.Count > 0) {
+                            CBORObject rList2 = GetSection(rList[iRecipient], "recipients");
+
+                            for (int iRecipient2 = 0; iRecipient2 < r.RecipientList.Count; iRecipient2++) {
+                                COSE.Recipient r2 = r.RecipientList[iRecipient2];
+
+                                SetField(rList2[iRecipient2], "Context_hex", r2.getContext(), ref fDirty);
+                                SetField(rList2[iRecipient2], "Secret_hex", r2.getSecret(), ref fDirty);
+                                SetField(rList2[iRecipient2], "KEK_hex", r2.getKEK(), ref fDirty);
+
                             }
-                        }
-                        else {
-                            r.Add("KDF", foo);
-                            fDirty = true;
                         }
                     }
                 }
@@ -668,6 +642,7 @@ namespace examples
                 case "salt": cborKey = COSE.CoseKeyParameterKeys.HKDF_Salt; goto binFromText;
                 case "apu_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyU_ID; goto binFromText;
                 case "apv_id": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyV_ID; goto binFromText;
+                case "apu_nonce": cborKey = COSE.CoseKeyParameterKeys.HKDF_Context_PartyU_nonce; goto binFromText;
                 case "supp_pub_other": cborKey = COSE.CoseKeyParameterKeys.HKDF_SuppPub_Other; goto binFromText;
                 case "spk_kid": cborKey = COSE.CoseKeyParameterKeys.ECDH_StaticKey_kid; goto binFromText;
 
@@ -997,6 +972,101 @@ namespace examples
             case "ECDH-SS+A128KW": return COSE.AlgorithmValues.ECDH_SS_HKDF_256_AES_KW_128;
 
             default: return old;
+            }
+        }
+
+        static int GetKeySize(CBORObject alg)
+        {
+            int cbitKey = -1;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+
+                case "AES-CCM-128/64":
+                case "AES-CMAC-128/64":
+                    cbitKey = 128;
+                    break;
+
+                case "AES-CMAC-256/64":
+                    cbitKey = 256;
+                    break;
+
+                case "HS384":
+                    cbitKey = 384;
+                    break;
+
+                default:
+                    throw new Exception("NYI");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((COSE.AlgorithmValuesInt) alg.AsInt32()) {
+                case COSE.AlgorithmValuesInt.AES_GCM_128:
+                case COSE.AlgorithmValuesInt.AES_CCM_16_64_128:
+                case COSE.AlgorithmValuesInt.AES_CCM_64_64_128:
+                case COSE.AlgorithmValuesInt.AES_CCM_16_128_128:
+                case COSE.AlgorithmValuesInt.AES_CCM_64_128_128:
+                case COSE.AlgorithmValuesInt.AES_KW_128:
+                    cbitKey = 128;
+                    break;
+
+                case COSE.AlgorithmValuesInt.AES_GCM_192:
+                case COSE.AlgorithmValuesInt.AES_KW_192:
+                    cbitKey = 192;
+                    break;
+
+                case COSE.AlgorithmValuesInt.AES_GCM_256:
+                case COSE.AlgorithmValuesInt.AES_CCM_16_64_256:
+                case COSE.AlgorithmValuesInt.AES_CCM_64_64_256:
+                case COSE.AlgorithmValuesInt.AES_CCM_16_128_256:
+                case COSE.AlgorithmValuesInt.AES_CCM_64_128_256:
+                case COSE.AlgorithmValuesInt.AES_KW_256:
+                case COSE.AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    break;
+
+                case COSE.AlgorithmValuesInt.HMAC_SHA_512:
+                    cbitKey = 512;
+                    break;
+
+                default:
+                    throw new Exception("NYI");
+                }
+            }
+            else throw new Exception("Algorithm incorrectly encoded");
+
+            return cbitKey;
+        }
+
+        static CBORObject GetSection(CBORObject control, string tag)
+        {
+            CBORObject obj;
+
+            if (control.ContainsKey(tag)) return control[tag];
+
+            obj = CBORObject.NewMap();
+            control.Add(tag, obj);
+            return obj;
+        }
+
+        static void SetField(CBORObject obj, string tag, byte[] value, ref bool fDirty)
+        {
+            if (obj.ContainsKey(tag)) {
+                if (value == null) {
+                    obj.Remove(CBORObject.FromObject(tag));
+                    fDirty = true;
+                    return;
+                }
+                string old = obj[tag].AsString();
+                string newVal = ToHex(value);
+                if (old != newVal) {
+                    obj[tag] = CBORObject.FromObject(newVal);
+                    fDirty = true;
+                }
+            }
+            else if (value != null) {
+                obj.Add(tag, CBORObject.FromObject(ToHex(value)));
+                fDirty = true;
             }
         }
 
