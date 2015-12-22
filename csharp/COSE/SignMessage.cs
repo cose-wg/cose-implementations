@@ -29,6 +29,8 @@ namespace COSE
             m_tag = Tags.Signed;
         }
 
+        public List<Signer> SignerList {  get { return signerList; } }
+
         public void AddSigner(Signer sig)
         {
             signerList.Add(sig);
@@ -202,6 +204,10 @@ namespace COSE
                 signObj.Add(cborProtected);
                 signObj.Add(new byte[0]); // External AAD
                 signObj.Add(body);
+
+#if FOR_EXAMPLES
+                m_toBeSigned = signObj.EncodeToBytes();
+#endif
 
                 rgbSignature = Sign(signObj.EncodeToBytes());
             }
@@ -410,6 +416,10 @@ namespace COSE
             return new Org.BouncyCastle.Math.BigInteger(rgb2);
         }
 
+#if FOR_EXAMPLES
+        byte[] m_toBeSigned = null;
+        public byte[] GetToBeSigned() { return m_toBeSigned; }
+#endif
     }
 
     public class CounterSignature : Signer
