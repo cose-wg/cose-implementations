@@ -243,6 +243,7 @@ namespace examples
                 if (sign.ContainsKey("protected")) AddAttributes(msg, sign["protected"], 0);
                 if (sign.ContainsKey("unprotected")) AddAttributes(msg, sign["unprotected"], 1);
                 if (sign.ContainsKey("unsent")) AddAttributes(msg, sign["unsent"], 2);
+                if (sign.ContainsKey("countersign")) AddCounterSignature(msg, sign["countersign"]);
 
                 if ((!sign.ContainsKey("signers")) || (sign["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
                 foreach (CBORObject recip in sign["signers"].Values) {
@@ -258,8 +259,15 @@ namespace examples
                         CBORObject sig = signers[iSigner];
 
                         SetField(signers[iSigner], "ToBeSign_hex", msg.SignerList[iSigner].GetToBeSigned(), ref fDirty);
-                    }  
+                    }
 
+                    signers = GetSection(GetSection(control, "intermediates"), "countersigners");
+                  for (int iSigner=0; iSigner<msg.CounterSignerList.Count; iSigner++) {
+                        CBORObject sig = signers[iSigner];
+
+                        SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
+
+                    }
                 }
 
                 if (outputFormat == Outputs.cborDiag) return UTF8Encoding.UTF8.GetBytes(msg.EncodeToCBORObject().ToString());
@@ -414,7 +422,7 @@ namespace examples
                 }
 
                 if (outputFormat == Outputs.cborDiag) {
-                    msg.Encrypt();
+                    msg.Encode();
 
                     CBORObject intermediates = GetSection(control, "intermediates");
 
@@ -443,6 +451,15 @@ namespace examples
                             }
                         }
                     }
+
+                    CBORObject signers = GetSection(GetSection(control, "intermediates"), "countersigners");
+                    for (int iSigner = 0; iSigner < msg.CounterSignerList.Count; iSigner++) {
+                        CBORObject sig = signers[iSigner];
+
+                        SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
+
+                    }
+
                 }
 
 
@@ -679,7 +696,7 @@ namespace examples
             if (items.Type == CBORType.Map) {
                 if ((!items.ContainsKey("signers")) || (items["signers"].Type != CBORType.Array)) throw new Exception("Missing or malformed counter signatures");
                 foreach (CBORObject recip in items["signers"].Values) {
-                    msg.AddCounterSignature(GetSigner(recip));
+                    msg.AddCounterSignature(GetSigner(recip, true));
                 }
             }
         }
@@ -748,13 +765,16 @@ namespace examples
             return recipient;
         }
 
-        static COSE.Signer GetSigner(CBORObject control)
+        static COSE.Signer GetSigner(CBORObject control, bool fCounterSign = false)
         {
             if (!control.ContainsKey("alg")) throw new Exception("Signer missing alg field");
 
             COSE.Key key = GetKey(control["key"]);
 
-            COSE.Signer signer = new COSE.Signer(key, control["alg"]);
+            COSE.Signer signer;
+
+            if (fCounterSign) signer = new COSE.CounterSignature(key, control["alg"]);
+            else signer = new COSE.Signer(key, control["alg"]);
 
             if (control.ContainsKey("protected")) AddAttributes(signer, control["protected"], 0);
             if (control.ContainsKey("unprotected")) AddAttributes(signer, control["unprotected"], 1);
