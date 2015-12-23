@@ -225,6 +225,7 @@ namespace COSE
             m_counterSignerList.Add(signer);
         }
 
+        public List<Signer> CounterSignerList {  get { return m_counterSignerList; } }
         public CBORObject EncodeToCBORObject()
         {
             CBORObject obj;

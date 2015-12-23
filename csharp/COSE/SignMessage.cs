@@ -77,6 +77,17 @@ namespace COSE
             }
             else obj.Add(new byte[0]);
 
+            if (m_counterSignerList.Count() != 0) {
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbContent));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(objProtected, rgbContent);
+                    }
+                }
+            }
+
             if ((objUnprotected == null) || (objUnprotected.Count == 0)) obj.Add(CBORObject.NewMap());
             else obj.Add(objUnprotected); // Add unprotected attributes
 
