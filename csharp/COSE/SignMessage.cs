@@ -398,8 +398,8 @@ namespace COSE
                         ecdsa.Init(true, param);
 
                         BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
-                        byte[] r = sig[0].ToByteArray();
-                        byte[] s = sig[1].ToByteArray();
+                        byte[] r = sig[0].ToByteArrayUnsigned();
+                        byte[] s = sig[1].ToByteArrayUnsigned();
                         byte[] sigs = new byte[r.Length + s.Length];
                         Array.Copy(r, sigs, r.Length);
                         Array.Copy(s, 0, sigs, r.Length, s.Length);

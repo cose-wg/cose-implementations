@@ -261,12 +261,14 @@ namespace examples
                         SetField(signers[iSigner], "ToBeSign_hex", msg.SignerList[iSigner].GetToBeSigned(), ref fDirty);
                     }
 
-                    signers = GetSection(GetSection(control, "intermediates"), "countersigners");
-                  for (int iSigner=0; iSigner<msg.CounterSignerList.Count; iSigner++) {
-                        CBORObject sig = signers[iSigner];
+                    if (msg.CounterSignerList.Count > 0) {
+                        signers = GetSection(GetSection(control, "intermediates"), "countersigners");
+                        for (int iSigner = 0; iSigner < msg.CounterSignerList.Count; iSigner++) {
+                            CBORObject sig = signers[iSigner];
 
-                        SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
+                            SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
 
+                        }
                     }
                 }
 
@@ -452,12 +454,14 @@ namespace examples
                         }
                     }
 
-                    CBORObject signers = GetSection(GetSection(control, "intermediates"), "countersigners");
-                    for (int iSigner = 0; iSigner < msg.CounterSignerList.Count; iSigner++) {
-                        CBORObject sig = signers[iSigner];
+                    if (msg.CounterSignerList.Count > 0) {
+                        CBORObject signers = GetSection(GetSection(control, "intermediates"), "countersigners");
+                        for (int iSigner = 0; iSigner < msg.CounterSignerList.Count; iSigner++) {
+                            CBORObject sig = signers[iSigner];
 
-                        SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
+                            SetField(signers[iSigner], "ToBeSign_hex", msg.CounterSignerList[iSigner].GetToBeSigned(), ref fDirty);
 
+                        }
                     }
 
                 }
