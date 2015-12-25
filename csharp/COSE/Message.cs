@@ -251,6 +251,7 @@ namespace COSE
         protected CBORObject objProtected = CBORObject.NewMap();
         protected CBORObject objUnprotected = CBORObject.NewMap();
         protected CBORObject objDontSend = CBORObject.NewMap();
+        protected byte[] externalData = new byte[0];
 
         public void AddAttribute(string name, string value, bool fProtected)
         {
@@ -331,6 +332,11 @@ namespace COSE
             if (objProtected.ContainsKey(label)) objProtected.Remove(label);
             if (objUnprotected.ContainsKey(label)) objUnprotected.Remove(label);
             if (objDontSend.ContainsKey(label)) objDontSend.Remove(label);
+        }
+
+        public void SetExternalData(byte[] newData)
+        {
+            externalData = newData;
         }
     }
 

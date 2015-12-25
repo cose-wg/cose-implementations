@@ -347,6 +347,7 @@ namespace examples
                 if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], 1);
                 if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
                 if (encrypt.ContainsKey("countersign")) AddCounterSignature(msg, encrypt["countersign"]);
+                if (encrypt.ContainsKey("external")) AddExternalData(msg, encrypt["external"]);
 
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
@@ -414,6 +415,7 @@ namespace examples
                 if (encrypt.ContainsKey("unprotected")) AddAttributes(msg, encrypt["unprotected"], 1);
                 if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
                 if (encrypt.ContainsKey("countersign")) AddCounterSignature(msg, encrypt["countersign"]);
+                if (encrypt.ContainsKey("external")) AddExternalData(msg, encrypt["external"]);
 
                 if (!encrypt.ContainsKey("alg")) throw new Exception("missing algorithm identifier");
                 //  Should check that this exists somewhere and has the correct value
@@ -695,6 +697,11 @@ namespace examples
             }
         }
 
+        static void AddExternalData(COSE.Message msg, CBORObject externData)
+        {
+            msg.SetExternalData(FromHex(externData.AsString()));
+        }
+
         static void AddCounterSignature(COSE.Message msg, CBORObject items)
         {
             if (items.Type == CBORType.Map) {
@@ -721,6 +728,7 @@ namespace examples
             if (control.ContainsKey("protected")) AddAttributes(recipient, control["protected"], 0);
             if (control.ContainsKey("unprotected")) AddAttributes(recipient, control["unprotected"], 1);
             if (control.ContainsKey("unsent")) AddAttributes(recipient, control["unsent"], 2);
+            if (control.ContainsKey("external")) AddExternalData(recipient, control["external"]);
 
             if (control.ContainsKey("recipients")) {
                 if ((!control.ContainsKey("recipients")) || (control["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");

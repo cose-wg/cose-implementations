@@ -35,7 +35,6 @@ namespace COSE
         protected List<Recipient> recipientList = new List<Recipient>();
         protected byte[] rgbEncrypted;
         protected byte[] rgbContent;
-        byte[] extern_aad = new byte[0];
 
 #if FOR_EXAMPLES
         byte[] m_cek;
@@ -381,11 +380,6 @@ namespace COSE
             context = newContext;
         }
 
-        public void SetExternalAAD(byte[] aadBytes)
-        {
-            extern_aad = aadBytes;
-        }
-
         private byte[] AES(CBORObject alg, byte[] K)
         {
             GcmBlockCipher cipher = new GcmBlockCipher(new AesFastEngine(), new BasicGcmMultiplier());
@@ -615,7 +609,7 @@ namespace COSE
 
             obj.Add(context);
             obj.Add( objProtected.EncodeToBytes());
-            obj.Add(CBORObject.FromObject(extern_aad));
+            obj.Add(CBORObject.FromObject(externalData));
 
             return obj.EncodeToBytes();
         }
@@ -1139,10 +1133,10 @@ namespace COSE
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256:
                     {
                         if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
-                        if (FindAttribute("apu") == null) {
+                        if (FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce) == null) {
                             byte[] rgbAPU = new byte[512 / 8];
                             s_PRNG.NextBytes(rgbAPU);
-                            AddUnprotected("apu", CBORObject.FromObject(rgbAPU));
+                            AddUnprotected(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce, CBORObject.FromObject(rgbAPU));
                         }
                         byte[] rgbSecret = ECDH_GenerateSecret(m_key);
                         return HKDF(rgbSecret, cbitKey, alg, new Sha256Digest());
