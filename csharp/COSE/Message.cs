@@ -39,6 +39,7 @@ namespace COSE
         static public readonly CBORObject IV = CBORObject.FromObject(5);
         static public readonly CBORObject PartialIV = CBORObject.FromObject(6);
         static public readonly CBORObject CounterSign = CBORObject.FromObject(7);
+        static public readonly CBORObject OperationTime = CBORObject.FromObject(8);
     }
 
     public enum AlgorithmValuesInt : int
