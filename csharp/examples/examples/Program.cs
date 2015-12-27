@@ -675,6 +675,20 @@ namespace examples
                     break;
 #endif
 
+                case "crit":
+                    cborKey = COSE.HeaderKeys.Critical;
+
+                    break;
+
+                case "op time":
+                    cborKey = COSE.HeaderKeys.OperationTime; 
+                    {
+                        DateTime when = DateTime.Parse(cborValue.AsString());
+                        cborValue = CBORObject.FromObject((long) (when - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+               
+                    }
+                    break;
+
                 default:
                     break;
                 }
