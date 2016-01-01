@@ -1059,10 +1059,12 @@ namespace COSE
 
                 case "AES-CCM-128/64":
                 case "AES-CMAC-128/64":
+                case "AES-MAC-128/64":
                     cbitKey = 128;
                     break;
 
                 case "AES-CMAC-256/64":
+                case "AES-MAC-256/64":
                     cbitKey = 256;
                     break;
 
