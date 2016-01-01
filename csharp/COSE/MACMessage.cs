@@ -194,8 +194,9 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "AES-128-MAC-64":
-                    ContentKey = AES_MAC(alg, ContentKey);
+                case "AES-MAC-128/64":
+                case "AES-MAC-256/64":
+                    ContentKey = AES_CBC_MAC(alg, ContentKey);
                     break;
 
                 case "AES-CMAC-128/64":
@@ -306,7 +307,6 @@ namespace COSE
         {
             int cbitKey;
             int cbitTag;
-            //  Defaults to PKCS#7
 
             IBlockCipher aes = new AesFastEngine();
             CMac mac = new CMac(aes);
@@ -322,7 +322,7 @@ namespace COSE
 
             Debug.Assert(alg.Type == CBORType.TextString);
             switch (alg.AsString()) {
-            case "AES-128-MAC-64":
+            case "AES-CMAC-128/64":
                 cbitKey = 128;
                 cbitTag = 64;
                 break;
@@ -359,13 +359,14 @@ namespace COSE
             return K;
         }
 
-        private byte[] AES_MAC(CBORObject alg, byte[] K)
+        private byte[] AES_CBC_MAC(CBORObject alg, byte[] K)
         {
             int cbitKey;
             int cbitTag;
             //  Defaults to PKCS#7
-            PaddedBufferedBlockCipher cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(new AesFastEngine()));
- 
+
+            IBlockCipher aes = new AesFastEngine();
+
             KeyParameter ContentKey;
 
             //  The requirements from spec
@@ -373,18 +374,25 @@ namespace COSE
             //  key sizes are 128, 192 and 256 bits
             //  Authentication tag sizes are 64 and 128 bits
 
-            byte[] IV = new byte[128/8];
+            byte[] IV = new byte[128 / 8];
 
             Debug.Assert(alg.Type == CBORType.TextString);
             switch (alg.AsString()) {
-            case "AES-128-MAC-64":
+            case "AES-MAC-128/64":
                 cbitKey = 128;
+                cbitTag = 64;
+                break;
+
+            case "AES-MAC-256/64":
+                cbitKey = 256;
                 cbitTag = 64;
                 break;
 
             default:
                 throw new Exception("Unrecognized algorithm");
             }
+
+            IMac mac = new CbcBlockCipherMac(aes, cbitTag, null);
 
             if (K == null) {
                 K = new byte[cbitKey / 8];
@@ -395,18 +403,16 @@ namespace COSE
 
             //  Build the text to be digested
 
-            ParametersWithIV parameters = new ParametersWithIV(ContentKey, IV);
-
-            cipher.Init(true, parameters);
+            mac.Init(ContentKey);
 
             byte[] toDigest = BuildContentBytes();
 
-            byte[] C = new byte[toDigest.Length + 128/8];
-            int len = cipher.ProcessBytes(toDigest, 0, toDigest.Length, C, 0);
-            len += cipher.DoFinal(C, len);
+            byte[] C = new byte[128 / 8];
+            mac.BlockUpdate(toDigest, 0, toDigest.Length);
+            mac.DoFinal(C, 0);
 
             rgbTag = new byte[cbitTag / 8];
-            Array.Copy(C, len - 128 / 8, rgbTag, 0, cbitTag / 8);
+            Array.Copy(C, 0, rgbTag, 0, cbitTag / 8);
 
             return K;
         }
