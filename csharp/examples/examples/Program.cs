@@ -40,6 +40,7 @@ namespace examples
                 bw.Close();
 
             }
+            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\hmac-examples");
         }
 
         static void RunTestsInDirectory(string strDirectory)
@@ -994,6 +995,8 @@ namespace examples
             case "RSA-OAEP": return COSE.AlgorithmValues.RSA_OAEP;
             case "RSA-OAEP-256": return COSE.AlgorithmValues.RSA_OAEP_256;
             case "HS256": return COSE.AlgorithmValues.HMAC_SHA_256;
+            case "HS256/64": return COSE.AlgorithmValues.HMAC_SHA_256_64;
+            case "HS384": return COSE.AlgorithmValues.HMAC_SHA_384;
             case "HS512": return COSE.AlgorithmValues.HMAC_SHA_512;
             case "ES256": return COSE.AlgorithmValues.ECDSA_256;
             case "ES512": return COSE.AlgorithmValues.ECDSA_512;
@@ -1002,6 +1005,10 @@ namespace examples
             case "direct": return COSE.AlgorithmValues.Direct;
             case "AES-CMAC-128/64": return COSE.AlgorithmValues.AES_CMAC_128_64;
             case "AES-CMAC-256/64": return COSE.AlgorithmValues.AES_CMAC_256_64;
+            case "AES-MAC-128/64": return COSE.AlgorithmValues.AES_CBC_MAC_128_64;
+            case "AES-MAC-256/64": return COSE.AlgorithmValues.AES_CBC_MAC_256_64;
+            case "AES-MAC-128/128": return COSE.AlgorithmValues.AES_CBC_MAC_128_128;
+            case "AES-MAC-256/128": return COSE.AlgorithmValues.AES_CBC_MAC_256_128;
             case "AES-CCM-16-128/64": return COSE.AlgorithmValues.AES_CCM_16_64_128;
             case "dir+kdf": return COSE.AlgorithmValues.dir_kdf;
             case "ECDH-ES": return COSE.AlgorithmValues.ECDH_ES_HKDF_256;

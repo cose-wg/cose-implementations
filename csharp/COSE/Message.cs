@@ -45,7 +45,8 @@ namespace COSE
     public enum AlgorithmValuesInt : int
     { 
         AES_GCM_128=1, AES_GCM_192=2, AES_GCM_256=3,
-        HMAC_SHA_256_64=99, HMAC_SHA_256=4, HMAC_SHA_384=5, HMAC_SHA_512=6,
+        HMAC_SHA_256_64=7, HMAC_SHA_256=4, HMAC_SHA_384=5, HMAC_SHA_512=6,
+        AES_CBC_MAC_128_64 = 14, AES_CBC_MAC_128_128=25, AES_CBC_MAC_256_64 =15, AES_CBC_MAC_256_128=26,
         ChaCha20_Poly1305=24,
         AES_CCM_16_64_128=10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
         AES_CCM_16_128_128=12, AES_CCM_16_128_256=13, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
@@ -69,9 +70,15 @@ namespace COSE
         static public readonly CBORObject HMAC_SHA_256 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_256);
         static public readonly CBORObject HMAC_SHA_384 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_384);
         static public readonly CBORObject HMAC_SHA_512 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_512);
+        static public readonly CBORObject HMAC_SHA_256_64 = CBORObject.FromObject(AlgorithmValuesInt.HMAC_SHA_256_64);
 
         static public readonly CBORObject AES_CMAC_128_64 = CBORObject.FromObject("AES-CMAC-128/64");
         static public readonly CBORObject AES_CMAC_256_64 = CBORObject.FromObject("AES-CMAC-256/64");
+
+        static public readonly CBORObject AES_CBC_MAC_128_64 = CBORObject.FromObject(AlgorithmValuesInt.AES_CBC_MAC_128_64);
+        static public readonly CBORObject AES_CBC_MAC_256_64 = CBORObject.FromObject(AlgorithmValuesInt.AES_CBC_MAC_256_64);
+        static public readonly CBORObject AES_CBC_MAC_128_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CBC_MAC_128_128);
+        static public readonly CBORObject AES_CBC_MAC_256_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CBC_MAC_256_128);
 
         static public readonly CBORObject AES_CCM_16_64_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_64_128);
 
