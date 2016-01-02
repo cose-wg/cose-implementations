@@ -1059,12 +1059,10 @@ namespace COSE
 
                 case "AES-CCM-128/64":
                 case "AES-CMAC-128/64":
-                case "AES-MAC-128/64":
                     cbitKey = 128;
                     break;
 
                 case "AES-CMAC-256/64":
-                case "AES-MAC-256/64":
                     cbitKey = 256;
                     break;
 
@@ -1084,6 +1082,8 @@ namespace COSE
                 case AlgorithmValuesInt.AES_CCM_16_128_128:
                 case AlgorithmValuesInt.AES_CCM_64_128_128:
                 case AlgorithmValuesInt.AES_KW_128:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
                     cbitKey = 128;
                     break;
 
@@ -1099,7 +1099,14 @@ namespace COSE
                 case AlgorithmValuesInt.AES_CCM_64_128_256:
                 case AlgorithmValuesInt.AES_KW_256:
                 case AlgorithmValuesInt.HMAC_SHA_256:
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
                     cbitKey = 256;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_384:
+                    cbitKey = 384;
                     break;
 
                 case AlgorithmValuesInt.HMAC_SHA_512:

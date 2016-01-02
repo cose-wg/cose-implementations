@@ -194,11 +194,6 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "AES-MAC-128/64":
-                case "AES-MAC-256/64":
-                    ContentKey = AES_CBC_MAC(alg, ContentKey);
-                    break;
-
                 case "AES-CMAC-128/64":
                 case "AES-CMAC-256/64":
                     ContentKey = AES_CMAC(alg, ContentKey);
@@ -213,7 +208,15 @@ namespace COSE
                 case AlgorithmValuesInt.HMAC_SHA_256:
                 case AlgorithmValuesInt.HMAC_SHA_384:
                 case AlgorithmValuesInt.HMAC_SHA_512:
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
                     ContentKey = HMAC(alg, ContentKey);
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                    case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    ContentKey = AES_CBC_MAC(alg, ContentKey);
                     break;
 
                 default:
@@ -252,6 +255,7 @@ namespace COSE
         private byte[] HMAC(CBORObject alg, byte[] K)
         {
             int cbitKey;
+            int cbResult;
             IDigest digest;
 
             if (alg.Type == CBORType.TextString) {
@@ -264,17 +268,26 @@ namespace COSE
                 switch ((AlgorithmValuesInt) alg.AsInt32()) {
                 case AlgorithmValuesInt.HMAC_SHA_256:
                     cbitKey = 256;
+                    cbResult = 256 / 8;
                     digest = new Sha256Digest();
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                    cbitKey = 256;
+                    digest = new Sha256Digest();
+                    cbResult = 64 / 8;
                     break;
 
                 case AlgorithmValuesInt.HMAC_SHA_384:
                     cbitKey = 384;
                     digest = new Sha384Digest();
+                    cbResult = cbitKey / 8;
                     break;
 
                 case AlgorithmValuesInt.HMAC_SHA_512:
                     cbitKey = 512;
                     digest = new Sha512Digest();
+                    cbResult = cbitKey / 8;
                     break;
 
                 default:
@@ -298,7 +311,8 @@ namespace COSE
             hmac.BlockUpdate(toDigest, 0, toDigest.Length);
             hmac.DoFinal(resBuf, 0);
 
-            rgbTag = resBuf;
+            rgbTag = new byte[cbResult];
+            Array.Copy(resBuf, rgbTag, cbResult);
 
             return K;
         }
@@ -376,16 +390,26 @@ namespace COSE
 
             byte[] IV = new byte[128 / 8];
 
-            Debug.Assert(alg.Type == CBORType.TextString);
-            switch (alg.AsString()) {
-            case "AES-MAC-128/64":
+            Debug.Assert(alg.Type == CBORType.Number);
+            switch ((AlgorithmValuesInt) alg.AsInt32()) {
+            case AlgorithmValuesInt.AES_CBC_MAC_128_64:
                 cbitKey = 128;
                 cbitTag = 64;
                 break;
 
-            case "AES-MAC-256/64":
+            case AlgorithmValuesInt.AES_CBC_MAC_256_64:
                 cbitKey = 256;
                 cbitTag = 64;
+                break;
+
+            case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                cbitKey = 128;
+                cbitTag = 128;
+                break;
+
+            case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                cbitKey = 256;
+                cbitTag = 128;
                 break;
 
             default:
