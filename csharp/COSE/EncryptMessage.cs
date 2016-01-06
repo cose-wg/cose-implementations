@@ -411,7 +411,7 @@ namespace COSE
                     break;
 
                 case AlgorithmValuesInt.AES_GCM_192:
-                    K = new byte[196 / 8];
+                    K = new byte[192 / 8];
                     break;
 
                 case AlgorithmValuesInt.AES_GCM_256:
@@ -477,18 +477,61 @@ namespace COSE
             CcmBlockCipher cipher = new CcmBlockCipher(new AesFastEngine());
             KeyParameter ContentKey;
             int cbitTag = 64;
+            int cbIV;
+            int cbitKey;
+
+            //  Figure out what the correct internal parameters to use are
+
+            Debug.Assert(alg.Type == CBORType.Number);
+            switch ((AlgorithmValuesInt) alg.AsInt32()) {
+            case AlgorithmValuesInt.AES_CCM_16_64_128:
+            case AlgorithmValuesInt.AES_CCM_64_64_128:
+            case AlgorithmValuesInt.AES_CCM_16_128_128:
+            case AlgorithmValuesInt.AES_CCM_64_128_128:
+                cbitKey = 128;
+                cbitTag = 64;
+
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_16_64_256:
+            case AlgorithmValuesInt.AES_CCM_64_64_256:
+            case AlgorithmValuesInt.AES_CCM_16_128_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_256:
+                cbitKey = 256;
+                cbitTag = 64;
+                break;
+
+            default:
+                throw new CoseException("Unsupported algorithm: " + alg);
+            }
+
+            switch ((AlgorithmValuesInt) alg.AsInt32()) {
+            case AlgorithmValuesInt.AES_CCM_16_64_128:
+            case AlgorithmValuesInt.AES_CCM_16_64_256:
+            case AlgorithmValuesInt.AES_CCM_16_128_128:
+            case AlgorithmValuesInt.AES_CCM_16_128_256:
+                cbIV = 15 - 2;
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_64_64_128:
+            case AlgorithmValuesInt.AES_CCM_64_64_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_128:
+                cbIV = 15 - 8;
+                break;
+
+            default:
+                throw new CoseException("Unsupported algorithm: " + alg);
+            }
 
             //  The requirements from JWA
-            //  IV is 96 bits
-            //  Authentication tag is 128 bits
-            //  key sizes are 128, 192 and 256 bits
 
-            byte[] IV = new byte[96 / 8];
+            byte[] IV = new byte[cbIV];
             CBORObject cbor = FindAttribute(HeaderKeys.IV);
             if (cbor != null) {
                 if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorreclty formed.");
                 if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
-                Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
+                Array.Copy(cbor.GetByteString(), 0, IV, 0, IV.Length);
             }
             else {
                 s_PRNG.NextBytes(IV);
@@ -496,27 +539,7 @@ namespace COSE
             }
 
             if (K == null) {
-                Debug.Assert(alg.Type == CBORType.Number);
-                switch ((AlgorithmValuesInt) alg.AsInt32()) {
-                case AlgorithmValuesInt.AES_CCM_16_64_128:
-                case AlgorithmValuesInt.AES_CCM_64_64_128:
-                case AlgorithmValuesInt.AES_CCM_16_128_128:
-                case AlgorithmValuesInt.AES_CCM_64_128_128:
-                    K = new byte[128 / 8];
-                    cbitTag = 64;
-                    break;
-
-                case AlgorithmValuesInt.AES_CCM_16_64_256:
-                case AlgorithmValuesInt.AES_CCM_64_64_256:
-                case AlgorithmValuesInt.AES_CCM_16_128_256:
-                case AlgorithmValuesInt.AES_CCM_64_128_256:
-                    K = new byte[256 / 8];
-                    cbitTag = 64;
-                    break;
-
-                default:
-                    throw new CoseException("Unsupported algorithm: " + alg);
-                }
+                    K = new byte[cbitKey/8];
                 s_PRNG.NextBytes(K);
             }
 
@@ -524,7 +547,7 @@ namespace COSE
 
             //  Build the object to be hashed
 
-            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, getAADBytes());
+            AeadParameters parameters = new AeadParameters(ContentKey, cbitTag, IV, getAADBytes());
 
             cipher.Init(true, parameters);
 
@@ -532,7 +555,6 @@ namespace COSE
             int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
             len += cipher.DoFinal(C, len);
 
-            Array.Resize(ref C, C.Length - (128/8) + (cbitTag/8));
             rgbEncrypted = C;
 
             return K;
@@ -1064,10 +1086,6 @@ namespace COSE
 
                 case "AES-CMAC-256/64":
                     cbitKey = 256;
-                    break;
-
-                case "HS384":
-                    cbitKey = 384;
                     break;
 
                 default:

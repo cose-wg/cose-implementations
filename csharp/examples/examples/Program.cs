@@ -41,6 +41,9 @@ namespace examples
 
             }
             RunTestsInDirectory("c:\\Projects\\COSE\\examples\\hmac-examples");
+            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\cbc-mac-examples");
+            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\aes-ccm-examples");
+            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\aes-gcm-examples");
         }
 
         static void RunTestsInDirectory(string strDirectory)
