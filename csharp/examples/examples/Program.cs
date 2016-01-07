@@ -1013,6 +1013,13 @@ namespace examples
             case "AES-MAC-128/128": return COSE.AlgorithmValues.AES_CBC_MAC_128_128;
             case "AES-MAC-256/128": return COSE.AlgorithmValues.AES_CBC_MAC_256_128;
             case "AES-CCM-16-128/64": return COSE.AlgorithmValues.AES_CCM_16_64_128;
+            case "AES-CCM-16-128/128": return COSE.AlgorithmValues.AES_CCM_16_128_128;
+            case "AES-CCM-16-256/64": return COSE.AlgorithmValues.AES_CCM_16_64_256;
+            case "AES-CCM-16-256/128": return COSE.AlgorithmValues.AES_CCM_16_128_256;
+            case "AES-CCM-64-128/64": return COSE.AlgorithmValues.AES_CCM_64_64_128;
+            case "AES-CCM-64-128/128": return COSE.AlgorithmValues.AES_CCM_64_128_128;
+            case "AES-CCM-64-256/64": return COSE.AlgorithmValues.AES_CCM_64_64_256;
+            case "AES-CCM-64-256/128": return COSE.AlgorithmValues.AES_CCM_64_128_256;
             case "dir+kdf": return COSE.AlgorithmValues.dir_kdf;
             case "ECDH-ES": return COSE.AlgorithmValues.ECDH_ES_HKDF_256;
             case "ECDH-SS": return COSE.AlgorithmValues.ECDH_SS_HKDF_256;

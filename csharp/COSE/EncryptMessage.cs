@@ -486,19 +486,28 @@ namespace COSE
             switch ((AlgorithmValuesInt) alg.AsInt32()) {
             case AlgorithmValuesInt.AES_CCM_16_64_128:
             case AlgorithmValuesInt.AES_CCM_64_64_128:
-            case AlgorithmValuesInt.AES_CCM_16_128_128:
-            case AlgorithmValuesInt.AES_CCM_64_128_128:
                 cbitKey = 128;
                 cbitTag = 64;
 
                 break;
 
+            case AlgorithmValuesInt.AES_CCM_16_128_128:
+            case AlgorithmValuesInt.AES_CCM_64_128_128:
+                cbitKey = 128;
+                cbitTag = 128;
+
+                break;
+
             case AlgorithmValuesInt.AES_CCM_16_64_256:
             case AlgorithmValuesInt.AES_CCM_64_64_256:
+                cbitKey = 256;
+                cbitTag = 64;
+                break;
+
             case AlgorithmValuesInt.AES_CCM_16_128_256:
             case AlgorithmValuesInt.AES_CCM_64_128_256:
                 cbitKey = 256;
-                cbitTag = 64;
+                cbitTag = 128;
                 break;
 
             default:
