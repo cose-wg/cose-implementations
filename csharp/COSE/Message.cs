@@ -81,6 +81,13 @@ namespace COSE
         static public readonly CBORObject AES_CBC_MAC_256_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CBC_MAC_256_128);
 
         static public readonly CBORObject AES_CCM_16_64_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_64_128);
+        static public readonly CBORObject AES_CCM_16_128_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_128_128);
+        static public readonly CBORObject AES_CCM_16_64_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_64_256);
+        static public readonly CBORObject AES_CCM_16_128_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_16_128_256);
+        static public readonly CBORObject AES_CCM_64_64_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_64_64_128);
+        static public readonly CBORObject AES_CCM_64_128_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_64_128_128);
+        static public readonly CBORObject AES_CCM_64_64_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_64_64_256);
+        static public readonly CBORObject AES_CCM_64_128_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_CCM_64_128_256);
 
         static public readonly CBORObject ChaCha20_Poly1305 = CBORObject.FromObject(AlgorithmValuesInt.ChaCha20_Poly1305);
 
