@@ -61,7 +61,7 @@ namespace COSE
         Direct_HKDF_HMAC_SHA_256=-10, Direct_HKDF_HMAC_SHA_512=-11,
         Direct_HKDF_AES_128=-12, Direct_HKDF_AES_256=-13,
 
-        ECDSA_256 = -7, ECDSA_384=-8, ECDSA_512=-9,
+        ECDSA_256 = -7, ECDSA_384=-35, ECDSA_512=-36,
         RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
         ECDH_ES_HKDF_256=-25, ECDH_ES_HKDF_512=-26,
         ECDH_SS_HKDF_256=-27, ECDH_SS_HKDF_512=-27,
