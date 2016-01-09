@@ -45,20 +45,29 @@ namespace COSE
     public enum AlgorithmValuesInt : int
     { 
         AES_GCM_128=1, AES_GCM_192=2, AES_GCM_256=3,
-        HMAC_SHA_256_64=7, HMAC_SHA_256=4, HMAC_SHA_384=5, HMAC_SHA_512=6,
+        HMAC_SHA_256_64=4, HMAC_SHA_256=5, HMAC_SHA_384=6, HMAC_SHA_512=7,
+
         AES_CBC_MAC_128_64 = 14, AES_CBC_MAC_128_128=25, AES_CBC_MAC_256_64 =15, AES_CBC_MAC_256_128=26,
+
         ChaCha20_Poly1305=24,
-        AES_CCM_16_64_128=10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
+
+        AES_CCM_16_64_128 =10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
         AES_CCM_16_128_128=12, AES_CCM_16_128_256=13, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
-        RSA_OAEP = -25, RSA_OAEP_256 = -26,
+
+        RSA_OAEP = -125, RSA_OAEP_256 = -126,
+
         AES_KW_128 = -3, AES_KW_192=-4, AES_KW_256=-5,
         DIRECT = -6,
+        Direct_HKDF_HMAC_SHA_256=-10, Direct_HKDF_HMAC_SHA_512=-11,
+        Direct_HKDF_AES_128=-12, Direct_HKDF_AES_256=-13,
+
         ECDSA_256 = -7, ECDSA_384=-8, ECDSA_512=-9,
         RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
-        ECDH_ES_HKDF_256=50,
-        ECDH_SS_HKDF_256=52,
-        ECDH_ES_HKDF_256_AES_KW_128 = 54, ECDH_ES_HKDF_256_AES_KW_192 = 55, ECDH_ES_HKDF_256_AES_KW_256 = 56,
-        ECDH_SS_HKDF_256_AES_KW_128 = 57, ECDH_SS_HKDF_256_AES_KW_192 = 58, ECDH_SS_HKDF_256_AES_KW_256 = 59,
+        ECDH_ES_HKDF_256=-25, ECDH_ES_HKDF_512=-26,
+        ECDH_SS_HKDF_256=-27, ECDH_SS_HKDF_512=-27,
+
+        ECDH_ES_HKDF_256_AES_KW_128 = -29, ECDH_ES_HKDF_256_AES_KW_192 = -30, ECDH_ES_HKDF_256_AES_KW_256 = -31,
+        ECDH_SS_HKDF_256_AES_KW_128 = -32, ECDH_SS_HKDF_256_AES_KW_192 = -33, ECDH_SS_HKDF_256_AES_KW_256 = -34,
     }
 
     public class AlgorithmValues
@@ -102,6 +111,7 @@ namespace COSE
         static public readonly CBORObject dir_kdf = CBORObject.FromObject("dir+kdf");
 
         static public readonly CBORObject ECDSA_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDSA_256);
+        static public readonly CBORObject ECDSA_384 = CBORObject.FromObject(AlgorithmValuesInt.ECDSA_384);
         static public readonly CBORObject ECDSA_512 = CBORObject.FromObject(AlgorithmValuesInt.ECDSA_512);
 
         static public readonly CBORObject RSA_PSS_256 = CBORObject.FromObject(AlgorithmValuesInt.RSA_PSS_256);
