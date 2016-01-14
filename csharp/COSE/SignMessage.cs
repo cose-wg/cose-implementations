@@ -265,6 +265,10 @@ namespace COSE
                                 alg = AlgorithmValues.ECDSA_256;
                                 break;
 
+                            case GeneralValuesInt.P384:
+                                alg = AlgorithmValues.ECDSA_384;
+                                break;
+
                             case GeneralValuesInt.P521:
                                 alg = AlgorithmValues.ECDSA_512;
                                 break;
@@ -275,10 +279,6 @@ namespace COSE
                         }
                         else if (keyToSign[CoseKeyParameterKeys.EC_Curve].Type == CBORType.TextString) {
                             switch (keyToSign[CoseKeyParameterKeys.EC_Curve].AsString()) {
-                            case "P-384":
-                                alg = CBORObject.FromObject("ES384");
-                                break;
-
                             default:
                                 throw new CoseException("Unknown curve");
                             }
@@ -302,7 +302,6 @@ namespace COSE
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "ES384":
                 case "PS384":
                     digest = new Sha384Digest();
                     digest2 = new Sha384Digest();
@@ -318,6 +317,12 @@ namespace COSE
                 case AlgorithmValuesInt.RSA_PSS_256:
                     digest = new Sha256Digest();
                     digest2 = new Sha256Digest();
+                    break;
+
+                case AlgorithmValuesInt.ECDSA_384:
+                case AlgorithmValuesInt.RSA_PSS_384:
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
                     break;
 
                 case AlgorithmValuesInt.ECDSA_512:
@@ -344,29 +349,11 @@ namespace COSE
                         signer.Init(true, param);
                         signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
                         return signer.GenerateSignature();
+
                     }
 
-                case "ES384":
-                    {
-                        SecureRandom random = Message.GetPRNG();
-
-                        X9ECParameters p = keyToSign.GetCurve();
-                        ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
-                        ParametersWithRandom param = new ParametersWithRandom(privKey, Message.GetPRNG());
-
-                        ECDsaSigner ecdsa = new ECDsaSigner();
-                        ecdsa.Init(true, param);
-
-                        BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
-                        byte[] r = sig[0].ToByteArray();
-                        byte[] s = sig[1].ToByteArray();
-                        byte[] sigs = new byte[r.Length + s.Length];
-                        Array.Copy(r, sigs, r.Length);
-                        Array.Copy(s, 0, sigs, r.Length, s.Length);
-
-                        return sigs;
-                    }
+                default:
+                    throw new CoseException("Unknown Algorithm");
                 }
             }
             else if (alg.Type == CBORType.Number) {
@@ -385,9 +372,14 @@ namespace COSE
                     }
 
                 case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.ECDSA_384:
                 case AlgorithmValuesInt.ECDSA_512:
                     {
                         SecureRandom random = Message.GetPRNG();
+
+                        digest.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        byte[] digestedMessage = new byte[digest.GetDigestSize()];
+                        digest.DoFinal(digestedMessage, 0);
 
                         X9ECParameters p = keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
@@ -397,12 +389,15 @@ namespace COSE
                         ECDsaSigner ecdsa = new ECDsaSigner();
                         ecdsa.Init(true, param);
 
-                        BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
+                        BigInteger[] sig = ecdsa.GenerateSignature(digestedMessage);
                         byte[] r = sig[0].ToByteArrayUnsigned();
                         byte[] s = sig[1].ToByteArrayUnsigned();
-                        byte[] sigs = new byte[r.Length + s.Length];
-                        Array.Copy(r, sigs, r.Length);
-                        Array.Copy(s, 0, sigs, r.Length, s.Length);
+
+                        int cbR = (p.Curve.FieldSize+7)/8;
+
+                        byte[] sigs = new byte[cbR*2];
+                        Array.Copy(r, 0, sigs, cbR-r.Length, r.Length);
+                        Array.Copy(s, 0, sigs, cbR+cbR-s.Length, s.Length);
 
                         return sigs;
                     }

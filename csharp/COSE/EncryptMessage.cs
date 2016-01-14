@@ -1678,7 +1678,7 @@ namespace COSE
     {
         public EncryptMessage() : base()
         {
-            SetContext("Encrypt");
+            SetContext("Encrypted");
             m_tag = Tags.Encrypted;
         }
 

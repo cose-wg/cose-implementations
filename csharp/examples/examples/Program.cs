@@ -20,65 +20,68 @@ namespace examples
         static COSE.KeySet allkeys = new COSE.KeySet();
         static COSE.KeySet allPubKeys = new COSE.KeySet();
 
+        static string RootDir = "c:\\projects\\COSE\\examples";
+
         static void Main(string[] args)
         {
-           //  COSE.Key.NewKey();
+           // COSE.Key.NewKey();
 
-            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\spec-examples");
+            RunTestsInDirectory("spec-examples");
             {
                 byte[] result = allkeys.EncodeToBytes();
 
-                FileStream bw = File.OpenWrite("c:\\Projects\\COSE\\examples\\spec-examples\\new\\private-keyset.bin");
+                FileStream bw = File.OpenWrite(RootDir + "\\new\\spec-examples\\private-keyset.bin");
                 bw.SetLength(0);
                 bw.Write(result, 0, result.Length);
                 bw.Close();
 
-                bw = File.OpenWrite("c:\\Projects\\COSE\\examples\\spec-examples\\new\\public-keyset.bin");
+                bw = File.OpenWrite(RootDir + "\\new\\spec-examples\\public-keyset.bin");
                 bw.SetLength(0);
                 result = allPubKeys.EncodeToBytes();
                 bw.Write(result, 0, result.Length);
                 bw.Close();
 
             }
-            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\hmac-examples");
-            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\cbc-mac-examples");
-            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\aes-ccm-examples");
-            RunTestsInDirectory("c:\\Projects\\COSE\\examples\\aes-gcm-examples");
+
+            RunTestsInDirectory("hmac-examples");
+            RunTestsInDirectory("cbc-mac-examples");
+            RunTestsInDirectory("aes-ccm-examples");
+            RunTestsInDirectory("aes-gcm-examples");
+            RunTestsInDirectory("ecdsa-examples");
         }
 
         static void RunTestsInDirectory(string strDirectory)
         {
             DirectoryInfo diTop;
 
-            diTop = new DirectoryInfo(strDirectory);
+            diTop = new DirectoryInfo(RootDir + "\\" + strDirectory);
             foreach (var di in diTop.EnumerateDirectories()) {
                 if ((!di.Attributes.HasFlag(FileAttributes.Hidden)) &&
                     (di.FullName.Substring(di.FullName.Length-4) != "\\new")) {
-                    RunTestsInDirectory(di.FullName);
+                    RunTestsInDirectory(strDirectory + di.Name);
                 }
             }
 
             foreach (var di in diTop.EnumerateFiles()) {
                 if (di.Extension == ".json") {
-                    ProcessFile(di);
+                    ProcessFile( strDirectory, di.Name);
                 }
             }
         }
 
-        static void ProcessFile(FileInfo di)
+        static void ProcessFile(String dir, String fileName)
         {
-            if (di.Name[0] == '.') return;
-            StreamReader file = File.OpenText(di.FullName);
+            StreamReader file = File.OpenText(RootDir + "\\" + dir + "\\" + fileName);
             string fileText = file.ReadToEnd();
             CBORObject control = CBORObject.FromJSONString(fileText);
             file.Close();
 
-            if (!Directory.Exists(di.DirectoryName + "\\new")) Directory.CreateDirectory(di.DirectoryName + "\\new");
+            Directory.CreateDirectory(RootDir +  "\\new\\" + dir);
 
             try {
-                if (ProcessJSON(control, di.DirectoryName + "\\new\\" + di.Name + ".bin")) {
+                if (ProcessJSON(control, RootDir + "\\new\\" + dir + "\\" + fileName + ".bin")) {
                     fileText = control.ToJSONStringPretty(1);
-                    StreamWriter file2 = File.CreateText(di.DirectoryName + "\\new\\" + di.Name);
+                    StreamWriter file2 = File.CreateText(RootDir  + "\\new\\" + dir + "\\" + fileName);
                     file2.Write(fileText);
                     file2.Write("\r\n");
                     file2.Close();
@@ -693,6 +696,10 @@ namespace examples
                     }
                     break;
 
+                case "ctyp":
+                    cborKey = COSE.HeaderKeys.ContentType;
+                    break;
+
                 default:
                     break;
                 }
@@ -872,6 +879,10 @@ namespace examples
                         newValue = COSE.GeneralValues.P256;
                         break;
 
+                    case "P-384":
+                        newValue = COSE.GeneralValues.P384;
+                        break;
+
                     case "P-521":
                         newValue = COSE.GeneralValues.P521;
                         break;
@@ -1002,6 +1013,7 @@ namespace examples
             case "HS384": return COSE.AlgorithmValues.HMAC_SHA_384;
             case "HS512": return COSE.AlgorithmValues.HMAC_SHA_512;
             case "ES256": return COSE.AlgorithmValues.ECDSA_256;
+            case "ES384": return COSE.AlgorithmValues.ECDSA_384;
             case "ES512": return COSE.AlgorithmValues.ECDSA_512;
             case "PS256": return COSE.AlgorithmValues.RSA_PSS_256;
             case "PS512": return COSE.AlgorithmValues.RSA_PSS_512;
