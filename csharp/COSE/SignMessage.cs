@@ -392,9 +392,12 @@ namespace COSE
                         BigInteger[] sig = ecdsa.GenerateSignature(digestedMessage);
                         byte[] r = sig[0].ToByteArrayUnsigned();
                         byte[] s = sig[1].ToByteArrayUnsigned();
-                        byte[] sigs = new byte[r.Length + s.Length];
-                        Array.Copy(r, sigs, r.Length);
-                        Array.Copy(s, 0, sigs, r.Length, s.Length);
+
+                        int cbR = (p.Curve.FieldSize+7)/8;
+
+                        byte[] sigs = new byte[cbR*2];
+                        Array.Copy(r, 0, sigs, cbR-r.Length, r.Length);
+                        Array.Copy(s, 0, sigs, cbR+cbR-s.Length, s.Length);
 
                         return sigs;
                     }

@@ -92,7 +92,7 @@ namespace COSE
 
         Key keyToSign;
         byte[] rgbSignature = null;
-        protected string context = "Signature0";
+        protected string context = "Signature1";
 
         public void AddSigner(Key key, CBORObject algorithm = null)
         {
@@ -223,6 +223,11 @@ namespace COSE
                     digest2 = new Sha256Digest();
                     break;
 
+                case AlgorithmValuesInt.ECDSA_384:
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
+                    break;
+
                 case AlgorithmValuesInt.ECDSA_512:
                 case AlgorithmValuesInt.RSA_PSS_512:
                     digest = new Sha512Digest();
@@ -249,27 +254,8 @@ namespace COSE
                         return signer.GenerateSignature();
                     }
 
-                case "ES384":
-                    {
-                        SecureRandom random = Message.GetPRNG();
-
-                        X9ECParameters p = keyToSign.GetCurve();
-                        ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-                        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
-                        ParametersWithRandom param = new ParametersWithRandom(privKey, Message.GetPRNG());
-
-                        ECDsaSigner ecdsa = new ECDsaSigner();
-                        ecdsa.Init(true, param);
-
-                        BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
-                        byte[] r = sig[0].ToByteArray();
-                        byte[] s = sig[1].ToByteArray();
-                        byte[] sigs = new byte[r.Length + s.Length];
-                        Array.Copy(r, sigs, r.Length);
-                        Array.Copy(s, 0, sigs, r.Length, s.Length);
-
-                        return sigs;
-                    }
+                default:
+                    throw new CoseException("Unknown Algorithm");
                 }
             }
             else if (alg.Type == CBORType.Number) {
@@ -288,9 +274,14 @@ namespace COSE
                     }
 
                 case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.ECDSA_384:
                 case AlgorithmValuesInt.ECDSA_512:
                     {
                         SecureRandom random = Message.GetPRNG();
+
+                        digest.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        byte[] digestedMessage = new byte[digest.GetDigestSize()];
+                        digest.DoFinal(digestedMessage, 0);
 
                         X9ECParameters p = keyToSign.GetCurve();
                         ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
@@ -300,12 +291,16 @@ namespace COSE
                         ECDsaSigner ecdsa = new ECDsaSigner();
                         ecdsa.Init(true, param);
 
-                        BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
-                        byte[] r = sig[0].ToByteArray();
-                        byte[] s = sig[1].ToByteArray();
-                        byte[] sigs = new byte[r.Length + s.Length];
-                        Array.Copy(r, sigs, r.Length);
-                        Array.Copy(s, 0, sigs, r.Length, s.Length);
+                        BigInteger[] sig = ecdsa.GenerateSignature(digestedMessage);
+
+                        byte[] r = sig[0].ToByteArrayUnsigned();
+                        byte[] s = sig[1].ToByteArrayUnsigned();
+
+                        int cbR = (p.Curve.FieldSize + 7) / 8;
+
+                        byte[] sigs = new byte[cbR * 2];
+                        Array.Copy(r, 0, sigs, cbR - r.Length, r.Length);
+                        Array.Copy(s, 0, sigs, cbR + cbR - s.Length, s.Length);
 
                         return sigs;
                     }

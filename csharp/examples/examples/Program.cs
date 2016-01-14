@@ -24,7 +24,7 @@ namespace examples
 
         static void Main(string[] args)
         {
-           //  COSE.Key.NewKey();
+           // COSE.Key.NewKey();
 
             RunTestsInDirectory("spec-examples");
             {
@@ -47,6 +47,7 @@ namespace examples
             RunTestsInDirectory("cbc-mac-examples");
             RunTestsInDirectory("aes-ccm-examples");
             RunTestsInDirectory("aes-gcm-examples");
+            RunTestsInDirectory("ecdsa-examples");
         }
 
         static void RunTestsInDirectory(string strDirectory)
@@ -695,6 +696,10 @@ namespace examples
                     }
                     break;
 
+                case "ctyp":
+                    cborKey = COSE.HeaderKeys.ContentType;
+                    break;
+
                 default:
                     break;
                 }
@@ -872,6 +877,10 @@ namespace examples
                     switch (control[item].AsString()) {
                     case "P-256":
                         newValue = COSE.GeneralValues.P256;
+                        break;
+
+                    case "P-384":
+                        newValue = COSE.GeneralValues.P384;
                         break;
 
                     case "P-521":

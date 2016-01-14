@@ -159,6 +159,7 @@ namespace COSE
             if (cborCurve.Type == CBORType.Number) {
                 switch ((GeneralValuesInt) cborCurve.AsInt32()) {
                 case GeneralValuesInt.P256: return NistNamedCurves.GetByName("P-256");
+                case GeneralValuesInt.P384: return NistNamedCurves.GetByName("P-384");
                 case GeneralValuesInt.P521: return NistNamedCurves.GetByName("P-521");
                 default:
                     throw new CoseException("Unsupported key type: " + cborKeyType.AsInt32());
@@ -166,7 +167,6 @@ namespace COSE
             }
             else if (cborCurve.Type == CBORType.TextString) {
                 switch (cborCurve.AsString()) {
-                case "P-384": return NistNamedCurves.GetByName("P384");
                 default:
                 throw new CoseException("Unsupported key type: " + cborKeyType.AsString());
                 }
@@ -215,7 +215,7 @@ namespace COSE
 
         public static void NewKey()
         {
-            X9ECParameters p = NistNamedCurves.GetByName("P-256");
+            X9ECParameters p = NistNamedCurves.GetByName("P-384");
 
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
@@ -227,7 +227,7 @@ namespace COSE
 
             CBORObject epk = CBORObject.NewMap();
             epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
-            epk.Add(CoseKeyParameterKeys.EC_Curve, "P-256");
+            epk.Add(CoseKeyParameterKeys.EC_Curve, "P-384");
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
             epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
             epk.Add(CoseKeyParameterKeys.EC_Y, priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());

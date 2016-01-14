@@ -185,6 +185,7 @@ namespace COSE
         static public readonly CBORObject KeyType_RSA = CBORObject.FromObject(GeneralValuesInt.KeyType_RSA);
         static public readonly CBORObject KeyType_Octet = CBORObject.FromObject(GeneralValuesInt.KeyType_Octet);
         static public readonly CBORObject P256 = CBORObject.FromObject(GeneralValuesInt.P256);
+        static public readonly CBORObject P384 = CBORObject.FromObject(GeneralValuesInt.P384);
         static public readonly CBORObject P521 = CBORObject.FromObject(GeneralValuesInt.P521);
 
     }
