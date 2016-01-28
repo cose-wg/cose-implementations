@@ -137,7 +137,7 @@ namespace COSE
                 CBORObject signObj = CBORObject.NewArray();
                 signObj.Add(context);
                 signObj.Add(cborProtected);
-                signObj.Add(new byte[0]); // External AAD
+                signObj.Add(externalData); // External AAD
                 signObj.Add(rgbContent);
 
                 rgbSignature = Sign(signObj.EncodeToBytes());
