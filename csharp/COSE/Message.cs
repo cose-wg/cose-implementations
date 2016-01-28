@@ -64,7 +64,7 @@ namespace COSE
         ECDSA_256 = -7, ECDSA_384=-35, ECDSA_512=-36,
         RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
         ECDH_ES_HKDF_256=-25, ECDH_ES_HKDF_512=-26,
-        ECDH_SS_HKDF_256=-27, ECDH_SS_HKDF_512=-27,
+        ECDH_SS_HKDF_256=-27, ECDH_SS_HKDF_512=-28,
 
         ECDH_ES_HKDF_256_AES_KW_128 = -29, ECDH_ES_HKDF_256_AES_KW_192 = -30, ECDH_ES_HKDF_256_AES_KW_256 = -31,
         ECDH_SS_HKDF_256_AES_KW_128 = -32, ECDH_SS_HKDF_256_AES_KW_192 = -33, ECDH_SS_HKDF_256_AES_KW_256 = -34,
@@ -72,6 +72,11 @@ namespace COSE
 
     public class AlgorithmValues
     {
+        static public readonly CBORObject HKDF_HMAC_SHA_256 = CBORObject.FromObject(AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_256);
+        static public readonly CBORObject HKDF_HMAC_SHA_512 = CBORObject.FromObject(AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_512);
+        static public readonly CBORObject HKDF_AES_128 = CBORObject.FromObject(AlgorithmValuesInt.Direct_HKDF_AES_128);
+        static public readonly CBORObject HKDF_AES_256 = CBORObject.FromObject(AlgorithmValuesInt.Direct_HKDF_AES_256);
+
         static public readonly CBORObject AES_GCM_128 = CBORObject.FromObject(AlgorithmValuesInt.AES_GCM_128);
         static public readonly CBORObject AES_GCM_192 = CBORObject.FromObject(AlgorithmValuesInt.AES_GCM_192);
         static public readonly CBORObject AES_GCM_256 = CBORObject.FromObject(AlgorithmValuesInt.AES_GCM_256);
@@ -119,11 +124,15 @@ namespace COSE
 
         static public readonly CBORObject ECDH_ES_HKDF_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256);
         static public readonly CBORObject ECDH_SS_HKDF_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256);
+        static public readonly CBORObject ECDH_ES_HKDF_512 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_512);
+        static public readonly CBORObject ECDH_SS_HKDF_512 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_512);
 
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_128 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128);
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_192 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192);
         static public readonly CBORObject ECDH_ES_HKDF_256_AES_KW_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256);
         static public readonly CBORObject ECDH_SS_HKDF_256_AES_KW_128 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128);
+        static public readonly CBORObject ECDH_SS_HKDF_256_AES_KW_192 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192);
+        static public readonly CBORObject ECDH_SS_HKDF_256_AES_KW_256 = CBORObject.FromObject(AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256);
     }
 
     public class CoseKeyKeys

@@ -213,7 +213,7 @@ namespace COSE
                 signObj.Add(context);
                 signObj.Add(bodyAttributes);
                 signObj.Add(cborProtected);
-                signObj.Add(new byte[0]); // External AAD
+                signObj.Add(externalData);
                 signObj.Add(body);
 
 #if FOR_EXAMPLES

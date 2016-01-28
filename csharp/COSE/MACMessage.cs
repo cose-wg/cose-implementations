@@ -65,7 +65,6 @@ namespace COSE
     {
         protected byte[] rgbTag;
         protected byte[] rgbContent;
-        byte[] external_aad = null;
         protected string strContext = "MAC";
 
         public MACMessage()
@@ -149,11 +148,6 @@ namespace COSE
         public void SetContent(string contentString)
         {
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
-        }
-
-        public void SetExternalAAD(byte[] bytes)
-        {
-            external_aad = bytes;
         }
 
         public  virtual void MAC()
@@ -245,7 +239,7 @@ namespace COSE
             obj.Add(strContext);
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
             else obj.Add(CBORObject.FromObject(new byte[0]));
-            if (external_aad != null) obj.Add(CBORObject.FromObject(external_aad));
+            if (externalData != null) obj.Add(CBORObject.FromObject(externalData));
             else obj.Add(CBORObject.FromObject(new byte[0]));
             obj.Add(rgbContent);
 
