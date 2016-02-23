@@ -215,7 +215,7 @@ namespace COSE
 
         public static void NewKey()
         {
-            X9ECParameters p = NistNamedCurves.GetByName("P-384");
+            X9ECParameters p = NistNamedCurves.GetByName("P-256");
 
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 

@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Org.BouncyCastle.Crypto.Prng;
 using Org.BouncyCastle.Security;
 
+using PeterO.Cbor;
+
+
 namespace examples
 {
     public class StaticPrng :  SecureRandom
@@ -15,6 +18,7 @@ namespace examples
         int m_iRngData;
         SecureRandom m_prng = null;
         bool m_fDirty = false;
+        CBORObject objNew = CBORObject.NewArray();
 
         /// <summary>Add more seed material to the generator.</summary>
         /// <param name="seed">A byte array to be mixed into the generator's state.</param>
@@ -55,12 +59,17 @@ namespace examples
             }
 
             Array.Copy(m_rgbRngData, m_iRngData, bytes, start, len);
+
+            byte[] x = new byte[len];
+            Array.Copy(m_rgbRngData, m_iRngData, x, 0, len);
+            objNew.Add(CBORObject.FromObject(Program.ToHex(x)));
+
             m_iRngData += len;
 
         }
 
-        public byte[] buffer { get { return m_rgbRngData; } }
-        public bool IsDirty { get { return m_fDirty; } }
+        public CBORObject buffer { get { if (m_iRngData == 0) return null; else return objNew; } }
+        public bool IsDirty { get { return m_fDirty || (m_iRngData != m_rgbRngData.Length) || true; } }
         public void Reset() { m_iRngData = 0; }
     }
 }

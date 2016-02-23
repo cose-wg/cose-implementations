@@ -13,7 +13,7 @@ namespace COSE
 
     public enum Tags
     { 
-        Encrypted = 993, Enveloped =992,Signed = 991, MAC = 994, MAC0=996, Signed0=997
+        Encrypted = 993, Enveloped =992,Signed = 991, MAC = 994, MAC0=996, Signed0=997, Unknown = 0
     }
 
     public class RecordKeys
@@ -35,6 +35,8 @@ namespace COSE
         static public readonly CBORObject Critical = CBORObject.FromObject(2);
         static public readonly CBORObject ContentType = CBORObject.FromObject(3);
         static public readonly CBORObject EphemeralKey = CBORObject.FromObject(-1);
+        static public readonly CBORObject StaticKey = CBORObject.FromObject(-2);
+        static public readonly CBORObject StaticKey_ID = CBORObject.FromObject(-3);
         static public readonly CBORObject KeyId = CBORObject.FromObject(4);
         static public readonly CBORObject IV = CBORObject.FromObject(5);
         static public readonly CBORObject PartialIV = CBORObject.FromObject(6);
@@ -51,8 +53,8 @@ namespace COSE
 
         ChaCha20_Poly1305=24,
 
-        AES_CCM_16_64_128 =10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=30, AES_CCM_64_64_256=31,
-        AES_CCM_16_128_128=12, AES_CCM_16_128_256=13, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
+        AES_CCM_16_64_128 =10, AES_CCM_16_64_256=11, AES_CCM_64_64_128=12, AES_CCM_64_64_256=13,
+        AES_CCM_16_128_128=30, AES_CCM_16_128_256=31, AES_CCM_64_128_128=32, AES_CCM_64_128_256=33,
 
         RSA_OAEP = -125, RSA_OAEP_256 = -126,
 
@@ -203,9 +205,22 @@ namespace COSE
     {
         protected bool m_forceArray = true;
         protected List<COSE.Signer> m_counterSignerList = new List<Signer>();
-        protected static SecureRandom s_PRNG = null;
-        protected bool m_useTag = true;
+        protected static SecureRandom s_PRNG = new SecureRandom();
+        protected bool m_emitTag = true;
+        protected bool m_emitContent;
         protected Tags m_tag;
+
+        public Message()
+        {
+            m_emitTag = true;
+            m_emitContent = true;
+        }
+
+        public Message(Boolean fEmitTag, Boolean fEmitContent)
+        {
+            m_emitTag = fEmitTag;
+            m_emitContent = fEmitContent;
+        }
 
         public static SecureRandom GetPRNG()
         {
@@ -217,18 +232,43 @@ namespace COSE
             s_PRNG = prng;
         }
 
-        public static Message DecodeFromBytes(byte[] messageData)
+        public static Message DecodeFromBytes(byte[] messageData, Tags defaultTag = Tags.Unknown)
         {
             CBORObject messageObject = CBORObject.DecodeFromBytes(messageData);
 
             if (messageObject.Type != CBORType.Array) throw new CoseException("Message is not a COSE security message.");
 
-            switch (messageObject[0].AsInt16()) {
-            case 1:         // It is an encrytion message
-                EnvelopeMessage enc = new EnvelopeMessage();
+            if (messageObject.IsTagged) {
+                if (messageObject.GetTags().Count() != 1) throw new CoseException("Malformed message - too many tags");
 
-                enc.DecodeFromCBORObject(messageObject, 1, messageObject.Count - 1);
+                if (defaultTag == Tags.Unknown) {
+                    defaultTag = (COSE.Tags) messageObject.OutermostTag.intValue();
+                }
+                else if (defaultTag != (COSE.Tags) messageObject.OutermostTag.intValue()) {
+                    throw new CoseException("Passed in tag does not match actual tag");
+                }
+            }
+
+            switch (defaultTag) {
+            case Tags.Unknown:
+                throw new CoseException("Message was not tagged and no default tagging option given");
+
+            case Tags.MAC: {
+                    MACMessage mac = new MACMessage();
+                    mac.DecodeFromCBORObject(messageObject);
+                    return mac;
+                }
+
+            case Tags.Enveloped:         // It is an encrytion message
+                EnvelopedMessage enc = new EnvelopedMessage();
+
+                enc.DecodeFromCBORObject(messageObject);
                 return enc;
+
+            case Tags.Encrypted:
+                EncryptMessage enc0 = new EncryptMessage();
+                enc0.DecodeFromCBORObject(messageObject);
+                return enc0;
 
             default:
                 throw new CoseException("Message is not recognized as a COSE security message.");
@@ -251,8 +291,8 @@ namespace COSE
 
         public bool EmitTag
         {
-            get { return m_useTag; }
-            set { m_useTag = value; }
+            get { return m_emitTag; }
+            set { m_emitTag = value; }
         }
 
         public void AddCounterSignature(COSE.Signer signer)
@@ -272,7 +312,7 @@ namespace COSE
 
             for (int i = 0; i < obj3.Count; i++) obj.Add(obj3[i]);
 
-            if (m_useTag) return CBORObject.FromObjectAndTag(obj, (int) m_tag);
+            if (m_emitTag) return CBORObject.FromObjectAndTag(obj, (int) m_tag);
             return obj;
         }
 

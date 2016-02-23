@@ -9,20 +9,15 @@ using PeterO.Cbor;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Paddings;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Crypto.Macs;
-using Org.BouncyCastle.Crypto.Modes;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Utilities;
-using Org.BouncyCastle.Utilities.Encoders;
 
 using System.Diagnostics;
 
 namespace COSE
 {
 
-    public class MAC0Message : MACMessage
+    public class MAC0Message : MacMessageCommon
     {
         public MAC0Message()
         {
@@ -30,20 +25,39 @@ namespace COSE
             m_tag = Tags.MAC0;
         }
 
-        public override void AddRecipient(Recipient recipient)
+        public void DecodeFromCBORObject(CBORObject obj)
         {
-            if (recipientList.Count != 0) throw new Exception("Can't have more than one recipient");
-            if (recipient.recipientType != RecipientType.direct) throw new Exception("Must be direct recipient");
+            if (obj.Count != 4) throw new CoseException("Invalid MAC structure");
 
-            recipient.SetContext("Mac0_Recipient");
-            recipientList.Add(recipient);
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+            }
+            else {
+                throw new CoseException("Invalid MAC structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == PeterO.Cbor.CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid MAC Structure");
+
+            // Plain Text
+            if (obj[2].Type == CBORType.ByteString) rgbContent = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid MAC Structure");
+            }
+
+            // Authentication tag
+            if (obj[3].Type == CBORType.ByteString) rgbTag = obj[3].GetByteString();
+            else throw new CoseException("Invalid MAC Structure");
         }
 
         public override CBORObject Encode()
         {
             CBORObject obj;
 
-            if (rgbTag == null) MAC();
+            if (rgbTag == null) throw new Exception("Must call Compute before encoding");
 
             obj = CBORObject.NewArray();
 
@@ -59,17 +73,150 @@ namespace COSE
             return obj;
         }
 
+        public void Compute(byte[] ContentKey)
+        {
+            CBORObject alg;
+
+            alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) {
+                alg = AlgorithmValues.HMAC_SHA_256;
+                if (objUnprotected == null) objUnprotected = CBORObject.NewMap();
+                objUnprotected.Add(HeaderKeys.Algorithm, alg);
+
+            }
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                case "AES-CMAC-256/64":
+                    rgbTag = AES_CMAC(alg, ContentKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                case AlgorithmValuesInt.HMAC_SHA_384:
+                case AlgorithmValuesInt.HMAC_SHA_512:
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                    rgbTag = HMAC(alg, ContentKey);
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    rgbTag = AES_CBC_MAC(alg, ContentKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+        }
+
+        public bool Validate(Recipient recipientReceiver)
+        {
+            byte[] rgbKey = null;
+            int cbitKey;
+
+            CBORObject alg = FindAttribute(COSE.HeaderKeys.Algorithm);
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                    cbitKey = 128;
+                    break;
+
+                case "AES-CMAC-256/64":
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_384: cbitKey = 384; break;
+                case AlgorithmValuesInt.HMAC_SHA_512: cbitKey = 512; break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                    cbitKey = 128;
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+            if (rgbKey == null) throw new CoseException("No Key Provided");
+
+            byte[] rgbCheck;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                case "AES-CMAC-256/64":
+                    rgbCheck = AES_CMAC(alg, rgbKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                case AlgorithmValuesInt.HMAC_SHA_384:
+                case AlgorithmValuesInt.HMAC_SHA_512:
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                    rgbCheck = HMAC(alg, rgbKey);
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    rgbCheck = AES_CBC_MAC(alg, rgbKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+            bool fReturn = true;
+            for (int i = 0; i < rgbCheck.Length; i++) {
+                fReturn &= (rgbTag[i] != rgbCheck[i]);
+            }
+            return fReturn;
+        }
     }
 
-    public class MACMessage : Message
+    public class MACMessage : MacMessageCommon
     {
-        protected byte[] rgbTag;
-        protected byte[] rgbContent;
-        protected string strContext = "MAC";
 
         public MACMessage()
         {
             m_tag = Tags.MAC;
+            strContext = "MAC";
         }
 
         protected List<Recipient> recipientList = new List<Recipient>();
@@ -81,14 +228,53 @@ namespace COSE
             recipientList.Add(recipient);
         }
 
- 
+        public void DecodeFromCBORObject(CBORObject obj)
+        {
+
+            if (obj.Count != 5) throw new CoseException("Invalid MAC structure");
+
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+            }
+            else {
+                throw new CoseException("Invalid MAC structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == PeterO.Cbor.CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid MAC Structure");
+
+            // Plain Text
+            if (obj[2].Type == CBORType.ByteString) rgbContent = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid MAC Structure");
+            }
+
+            // Authentication tag
+            if (obj[3].Type == CBORType.ByteString) rgbTag = obj[3].GetByteString();
+            else throw new CoseException("Invalid MAC Structure");
+
+
+            // Recipients
+            if (obj[4].Type == CBORType.Array) {
+                // An array of recipients to be processed
+                for (int i = 0; i < obj[4].Count; i++) {
+                    Recipient recip = new Recipient();
+                    recip.DecodeFromCBORObject(obj[4][i]);
+                    recipientList.Add(recip);
+                }
+            }
+            else throw new CoseException("Invalid MAC Structure");
+        }
+
         public override CBORObject Encode()
         {
             CBORObject obj;
-            
+
             if (rgbTag == null) MAC();
 
-#if USE_ARRAY
             obj = CBORObject.NewArray();
 
             if (objProtected.Count > 0) obj.Add(objProtected.EncodeToBytes());
@@ -118,41 +304,15 @@ namespace COSE
             else {
                 obj.Add(null);      // No recipients - set to null
             }
-#else
-            obj = CBORObject.NewMap();
 
-            if (objProtected.Count > 0) obj.Add(RecordKeys.Protected, objProtected.EncodeToBytes());
-
-            if (objUnprotected.Count > 0) obj.Add(RecordKeys.Unprotected, objUnprotected); // Add unprotected attributes
-
-            obj.Add(RecordKeys.CipherText,  rgbContent);      // Add ciphertext
-            obj.Add(RecordKeys.Tag, rgbTag);
-
-            if (recipientList.Count > 0) {
-                CBORObject recipients = CBORObject.NewArray();
-
-                foreach (Recipient key in recipientList) {
-                    recipients.Add(key.Encode());
-                }
-                obj.Add(RecordKeys.Recipients, recipients);
-            }
-#endif
             return obj;
         }
 
-        public void SetContent(byte[] keyBytes)
-        {
-            rgbContent = keyBytes;
-        }
-
-        public void SetContent(string contentString)
-        {
-            rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
-        }
-
-        public  virtual void MAC()
+ 
+        public virtual void MAC()
         {
             CBORObject alg;
+            int cbitKey;
 
             //  Get the algorithm we are using - the default is AES GCM
 
@@ -163,6 +323,45 @@ namespace COSE
                 objUnprotected.Add(HeaderKeys.Algorithm, alg);
 
             }
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                    cbitKey = 128;
+                    break;
+
+                case "AES-CMAC-256/64":
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_384: cbitKey = 384; break;
+                case AlgorithmValuesInt.HMAC_SHA_512: cbitKey = 512; break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                    cbitKey = 128;
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
 
             byte[] ContentKey = null;
 
@@ -186,11 +385,16 @@ namespace COSE
 
             if (recipientTypes == 3) throw new Exception("It is not legal to mix direct and indirect recipients in a message");
 
+            if (ContentKey == null) {
+                ContentKey = new byte[cbitKey / 8];
+                s_PRNG.NextBytes(ContentKey);
+            }
+
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
                 case "AES-CMAC-128/64":
                 case "AES-CMAC-256/64":
-                    ContentKey = AES_CMAC(alg, ContentKey);
+                    rgbTag = AES_CMAC(alg, ContentKey);
                     break;
 
                 default:
@@ -203,14 +407,14 @@ namespace COSE
                 case AlgorithmValuesInt.HMAC_SHA_384:
                 case AlgorithmValuesInt.HMAC_SHA_512:
                 case AlgorithmValuesInt.HMAC_SHA_256_64:
-                    ContentKey = HMAC(alg, ContentKey);
+                    rgbTag = HMAC(alg, ContentKey);
                     break;
 
                 case AlgorithmValuesInt.AES_CBC_MAC_128_64:
                 case AlgorithmValuesInt.AES_CBC_MAC_128_128:
-                    case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
                 case AlgorithmValuesInt.AES_CBC_MAC_256_128:
-                    ContentKey = AES_CBC_MAC(alg, ContentKey);
+                    rgbTag = AES_CBC_MAC(alg, ContentKey);
                     break;
 
                 default:
@@ -232,7 +436,138 @@ namespace COSE
             return;
         }
 
+        public bool Validate(Recipient recipientReceiver)
+        {
+            byte[] rgbKey = null;
+            int cbitKey;
+
+            CBORObject alg = FindAttribute(COSE.HeaderKeys.Algorithm);
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                    cbitKey = 128;
+                    break;
+
+                case "AES-CMAC-256/64":
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_384: cbitKey = 384; break;
+                case AlgorithmValuesInt.HMAC_SHA_512: cbitKey = 512; break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                    cbitKey = 128;
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    cbitKey = 256;
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+
+            foreach (Recipient msgRecpient in recipientList) {
+                if (recipientReceiver == msgRecpient) {
+                    try {
+                        rgbKey = msgRecpient.Decrypt(cbitKey, alg);
+                    }
+                    catch (CoseException) { }
+                }
+                else if (recipientReceiver == null) {
+                    ;
+                }
+                if (rgbKey != null) break;
+            }
+
+            if (rgbKey == null) throw new CoseException("Recipient not found");
+
+            byte[] rgbCheck;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "AES-CMAC-128/64":
+                case "AES-CMAC-256/64":
+                    rgbCheck = AES_CMAC(alg, rgbKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm is not recognized");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                case AlgorithmValuesInt.HMAC_SHA_384:
+                case AlgorithmValuesInt.HMAC_SHA_512:
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                    rgbCheck = HMAC(alg, rgbKey);
+                    break;
+
+                case AlgorithmValuesInt.AES_CBC_MAC_128_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_128_128:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_64:
+                case AlgorithmValuesInt.AES_CBC_MAC_256_128:
+                    rgbCheck = AES_CBC_MAC(alg, rgbKey);
+                    break;
+
+                default:
+                    throw new Exception("MAC algorithm not recognized" + alg.AsInt32());
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+            bool fReturn = true;
+            for (int i = 0; i < rgbCheck.Length; i++) {
+                fReturn &= (rgbTag[i] != rgbCheck[i]);
+            }
+            return fReturn;
+        }
+
+
+#if FOR_EXAMPLES
+        byte[] m_cek = null;
+        public byte[] getCEK() { return m_cek; }
+#endif
+    }
+
+    public abstract class MacMessageCommon : Message
+    {
+        protected byte[] rgbTag;
+        protected byte[] rgbContent;
+        protected string strContext = "";
+
+        public void SetContent(byte[] keyBytes)
+        {
+            rgbContent = keyBytes;
+        }
+
+        public void SetContent(string contentString)
+        {
+            rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
+        }
+
+#if FOR_EXAMPLES
         public byte[] BuildContentBytes()
+#else
+        private byte[] BuildContentBytes()
+#endif
         {
             CBORObject obj = CBORObject.NewArray();
 
@@ -246,128 +581,7 @@ namespace COSE
             return obj.EncodeToBytes();
         }
 
-        private byte[] HMAC(CBORObject alg, byte[] K)
-        {
-            int cbitKey;
-            int cbResult;
-            IDigest digest;
-
-            if (alg.Type == CBORType.TextString) {
-                switch (alg.AsString()) {
-                default:
-                    throw new Exception("Unrecognized algorithm");
-                }
-            }
-            else if (alg.Type == CBORType.Number) {
-                switch ((AlgorithmValuesInt) alg.AsInt32()) {
-                case AlgorithmValuesInt.HMAC_SHA_256:
-                    cbitKey = 256;
-                    cbResult = 256 / 8;
-                    digest = new Sha256Digest();
-                    break;
-
-                case AlgorithmValuesInt.HMAC_SHA_256_64:
-                    cbitKey = 256;
-                    digest = new Sha256Digest();
-                    cbResult = 64 / 8;
-                    break;
-
-                case AlgorithmValuesInt.HMAC_SHA_384:
-                    cbitKey = 384;
-                    digest = new Sha384Digest();
-                    cbResult = cbitKey / 8;
-                    break;
-
-                case AlgorithmValuesInt.HMAC_SHA_512:
-                    cbitKey = 512;
-                    digest = new Sha512Digest();
-                    cbResult = cbitKey / 8;
-                    break;
-
-                default:
-                    throw new CoseException("Unknown or unsupported algorithm");
-                }
-            }
-            else throw new CoseException("Algorithm incorrectly encoded");
-
-            if (K == null) {
-                K = new byte[cbitKey/8];
-                s_PRNG.NextBytes(K);
-            }
-
-            HMac hmac = new HMac(digest);
-            KeyParameter key = new KeyParameter(K);
-            byte[] resBuf = new byte[hmac.GetMacSize()];
-
-            byte[] toDigest = BuildContentBytes();
-
-            hmac.Init(key);
-            hmac.BlockUpdate(toDigest, 0, toDigest.Length);
-            hmac.DoFinal(resBuf, 0);
-
-            rgbTag = new byte[cbResult];
-            Array.Copy(resBuf, rgbTag, cbResult);
-
-            return K;
-        }
-
-        private byte[] AES_CMAC(CBORObject alg, byte[] K)
-        {
-            int cbitKey;
-            int cbitTag;
-
-            IBlockCipher aes = new AesFastEngine();
-            CMac mac = new CMac(aes);
-
-            KeyParameter ContentKey;
-
-            //  The requirements from spec
-            //  IV is 128 bits of zeros
-            //  key sizes are 128, 192 and 256 bits
-            //  Authentication tag sizes are 64 and 128 bits
-
-            byte[] IV = new byte[128 / 8];
-
-            Debug.Assert(alg.Type == CBORType.TextString);
-            switch (alg.AsString()) {
-            case "AES-CMAC-128/64":
-                cbitKey = 128;
-                cbitTag = 64;
-                break;
-
-            case "AES-CMAC-256/64":
-                cbitKey = 256;
-                cbitTag = 64;
-                break;
-
-            default:
-                throw new Exception("Unrecognized algorithm");
-            }
-
-            if (K == null) {
-                K = new byte[cbitKey / 8];
-                s_PRNG.NextBytes(K);
-            }
-
-            ContentKey = new KeyParameter(K);
-
-            //  Build the text to be digested
-
-            mac.Init(ContentKey);
-
-            byte[] toDigest = BuildContentBytes();
-
-            byte[] C = new byte[128/8];
-            mac.BlockUpdate(toDigest, 0, toDigest.Length);
-            mac.DoFinal(C, 0);
-
-            rgbTag = new byte[cbitTag / 8];
-            Array.Copy(C, 0, rgbTag, 0, cbitTag / 8);
-
-            return K;
-        }
-
-        private byte[] AES_CBC_MAC(CBORObject alg, byte[] K)
+        protected byte[] AES_CBC_MAC(CBORObject alg, byte[] K)
         {
             int cbitKey;
             int cbitTag;
@@ -412,10 +626,59 @@ namespace COSE
 
             IMac mac = new CbcBlockCipherMac(aes, cbitTag, null);
 
-            if (K == null) {
-                K = new byte[cbitKey / 8];
-                s_PRNG.NextBytes(K);
+            if (K.Length != cbitKey / 8) throw new CoseException("Key is incorrectly sized");
+            ContentKey = new KeyParameter(K);
+
+            //  Build the text to be digested
+
+            mac.Init(ContentKey);
+
+            byte[] toDigest = BuildContentBytes();
+
+            byte[] C = new byte[128 / 8];
+            mac.BlockUpdate(toDigest, 0, toDigest.Length);
+            mac.DoFinal(C, 0);
+
+            byte[] rgbResult = new byte[cbitTag / 8];
+            Array.Copy(C, 0, rgbResult, 0, cbitTag / 8);
+
+            return rgbResult;
+        }
+
+        protected byte[] AES_CMAC(CBORObject alg, byte[] K)
+        {
+            int cbitKey;
+            int cbitTag;
+
+            IBlockCipher aes = new AesFastEngine();
+            CMac mac = new CMac(aes);
+
+            KeyParameter ContentKey;
+
+            //  The requirements from spec
+            //  IV is 128 bits of zeros
+            //  key sizes are 128, 192 and 256 bits
+            //  Authentication tag sizes are 64 and 128 bits
+
+            byte[] IV = new byte[128 / 8];
+
+            Debug.Assert(alg.Type == CBORType.TextString);
+            switch (alg.AsString()) {
+            case "AES-CMAC-128/64":
+                cbitKey = 128;
+                cbitTag = 64;
+                break;
+
+            case "AES-CMAC-256/64":
+                cbitKey = 256;
+                cbitTag = 64;
+                break;
+
+            default:
+                throw new Exception("Unrecognized algorithm");
             }
+
+            if (K.Length != cbitKey / 8) throw new CoseException("Key is incorrectly sized");
 
             ContentKey = new KeyParameter(K);
 
@@ -429,15 +692,72 @@ namespace COSE
             mac.BlockUpdate(toDigest, 0, toDigest.Length);
             mac.DoFinal(C, 0);
 
-            rgbTag = new byte[cbitTag / 8];
-            Array.Copy(C, 0, rgbTag, 0, cbitTag / 8);
+            byte[] rgbOut = new byte[cbitTag / 8];
+            Array.Copy(C, 0, rgbOut, 0, cbitTag / 8);
 
-            return K;
+            return rgbOut;
         }
 
-#if FOR_EXAMPLES
-        byte[] m_cek= null;
-        public byte[] getCEK() { return m_cek; }
-#endif
+        protected byte[] HMAC(CBORObject alg, byte[] K)
+        {
+            int cbitKey;
+            int cbResult;
+            IDigest digest;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                default:
+                    throw new Exception("Unrecognized algorithm");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.HMAC_SHA_256:
+                    cbitKey = 256;
+                    cbResult = 256 / 8;
+                    digest = new Sha256Digest();
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_256_64:
+                    cbitKey = 256;
+                    digest = new Sha256Digest();
+                    cbResult = 64 / 8;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_384:
+                    cbitKey = 384;
+                    digest = new Sha384Digest();
+                    cbResult = cbitKey / 8;
+                    break;
+
+                case AlgorithmValuesInt.HMAC_SHA_512:
+                    cbitKey = 512;
+                    digest = new Sha512Digest();
+                    cbResult = cbitKey / 8;
+                    break;
+
+                default:
+                    throw new CoseException("Unknown or unsupported algorithm");
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
+
+            if (K == null) throw new CoseException("No Key value");
+
+            HMac hmac = new HMac(digest);
+            KeyParameter key = new KeyParameter(K);
+            byte[] resBuf = new byte[hmac.GetMacSize()];
+
+            byte[] toDigest = BuildContentBytes();
+
+            hmac.Init(key);
+            hmac.BlockUpdate(toDigest, 0, toDigest.Length);
+            hmac.DoFinal(resBuf, 0);
+
+            byte[] rgbOut = new byte[cbResult];
+            Array.Copy(resBuf, rgbOut, cbResult);
+
+            return rgbOut;
+        }
     }
 }
