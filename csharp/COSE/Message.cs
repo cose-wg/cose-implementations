@@ -65,6 +65,7 @@ namespace COSE
 
         ECDSA_256 = -7, ECDSA_384=-35, ECDSA_512=-36,
         RSA_PSS_256 = -26, RSA_PSS_384=-27, RSA_PSS_512 = -28,
+        EdDSA = -8,
         ECDH_ES_HKDF_256=-25, ECDH_ES_HKDF_512=-26,
         ECDH_SS_HKDF_256=-27, ECDH_SS_HKDF_512=-28,
 

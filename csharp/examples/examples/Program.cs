@@ -379,7 +379,7 @@ namespace examples
             }
 
             {
-                msg.Encrypt();
+                msg.Encode();
 
                 CBORObject intermediates = GetSection(control, "intermediates");
 

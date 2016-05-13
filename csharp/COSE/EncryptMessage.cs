@@ -748,7 +748,7 @@ namespace COSE
 
         public void AddRecipient(Recipient recipient)
         {
-            recipient.SetContext("Env_Recipient");
+            recipient.SetContext("Enc_Recipient");
             recipientList.Add(recipient);
         }
 
@@ -801,12 +801,10 @@ namespace COSE
             byte[] rgbSecret;
             byte[] rgbKey;
 
-            try {
-                alg = FindAttribute(HeaderKeys.Algorithm);
-            }
-            catch (CoseException) {
-                return null;   // This is a bad state
-            }
+            alg = FindAttribute(HeaderKeys.Algorithm);
+
+            if (alg == null) return null;
+            if (key == null) return null;
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
@@ -1859,7 +1857,7 @@ namespace COSE
     {
         public EncryptMessage() : base(true, true)
         {
-            context = "Encrypted";
+            context = "Encrypt1";
             m_tag = Tags.Encrypted;
         }
 
@@ -1947,6 +1945,12 @@ namespace COSE
 
         public EnvelopedMessage() : base(true, true)
         {
+            context = "Encrypt";
+            m_tag = Tags.Enveloped;
+        }
+
+        public EnvelopedMessage(Boolean emitTag, Boolean emitContent) : base(emitTag, emitContent)
+        {
             context = "Enveloped";
             m_tag = Tags.Enveloped;
         }
@@ -2018,7 +2022,7 @@ namespace COSE
 
             obj.Add(objUnprotected); // Add unprotected attributes
 
-            if (rgbEncrypted == null) obj.Add(new byte[0]);
+            if (!m_emitContent) obj.Add(CBORObject.Null);
             else obj.Add(rgbEncrypted);      // Add ciphertext
 
             if ((recipientList.Count == 1) && !m_forceArray) {
@@ -2055,37 +2059,9 @@ namespace COSE
             int cbitCEK = 0;
 
             CBORObject alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) throw new CoseException("No Algorithm Specified");
 
-            if (alg.Type == CBORType.TextString) {
-                throw new CoseException("Algorithm not supported: " + alg.AsString());
-            }
-            else if (alg.Type == CBORType.Number) {
-                switch ((AlgorithmValuesInt) alg.AsInt32()) {
-                case AlgorithmValuesInt.AES_GCM_128:
-                case AlgorithmValuesInt.AES_CCM_16_64_128:
-                case AlgorithmValuesInt.AES_CCM_16_128_128:
-                case AlgorithmValuesInt.AES_CCM_64_64_128:
-                case AlgorithmValuesInt.AES_CCM_64_128_128:
-                    cbitCEK = 128;
-                    break;
-
-                case AlgorithmValuesInt.AES_GCM_192:
-                    cbitCEK = 192;
-                    break;
-
-                case AlgorithmValuesInt.AES_GCM_256:
-                case AlgorithmValuesInt.AES_CCM_16_64_256:
-                case AlgorithmValuesInt.AES_CCM_16_128_256:
-                case AlgorithmValuesInt.AES_CCM_64_64_256:
-                case AlgorithmValuesInt.AES_CCM_64_128_256:
-                    cbitCEK = 256;
-                    break;
-
-                default:
-                    throw new CoseException("Unknown or unimplemented algorithm " + alg.ToString());
-                }
-            }
-            else throw new CoseException("Algorithm incorrectly encoded");
+            cbitCEK = GetKeySize(alg);
 
             foreach (Recipient recipient in recipientList) {
                 try {
@@ -2113,13 +2089,15 @@ namespace COSE
 
             //  Get the algorithm we are using - the default is AES GCM
 
-            try {
-                alg = FindAttribute(HeaderKeys.Algorithm);
-            }
-            catch {
+            alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) throw new CoseException("No Algorithm Specified");
+
+            /*
+            if (alg == null) {
                 alg = AlgorithmValues.AES_GCM_128;
-                AddUnprotected(HeaderKeys.Algorithm, alg);
+                AddProtected(HeaderKeys.Algorithm, alg);
             }
+            */
 
             byte[] ContentKey = null;
 
@@ -2142,6 +2120,7 @@ namespace COSE
             }
 
             if (recipientTypes == 3) throw new CoseException("It is not legal to mix direct and indirect recipients in a message");
+            if (recipientTypes == 0) throw new CoseException("No Recipients Specified");
 
             if (ContentKey == null) {
                 ContentKey = new byte[GetKeySize(alg) / 8];
