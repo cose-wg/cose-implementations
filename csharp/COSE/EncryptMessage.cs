@@ -115,11 +115,9 @@ namespace COSE
                     ContentKey = AES_CCM(alg, ContentKey);
                     break;
 
-#if false
                 case AlgorithmValuesInt.ChaCha20_Poly1305:
                     ContentKey = ChaCha20_Poly1305(alg, ContentKey);
                     break;
-#endif
 
                 default:
                     throw new CoseException("Content encryption algorithm is not recognized");
@@ -486,24 +484,23 @@ namespace COSE
             rgbContent = C;
         }
 
-#if false
         private byte[] ChaCha20_Poly1305(CBORObject alg, byte[] K)
         {
             ChaChaEngine cipher = new ChaChaEngine();
-            Poly1305 poly = new Poly1305();
+            Poly1305 poly;
 
             KeyParameter ContentKey;
-            int cbitTag = 64;
+            int cbitTag = 128;
 
             //  The requirements from JWA
             //  IV is 96 bits
             //  Authentication tag is 128 bits
-            //  key sizes are 128, 192 and 256 bits
+            //  key size is 256 bits
 
             byte[] IV = new byte[96 / 8];
             CBORObject cbor = FindAttribute(HeaderKeys.IV);
             if (cbor != null) {
-                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorreclty formed.");
+                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorrectly formed.");
                 if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
                 Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
             }
@@ -528,27 +525,42 @@ namespace COSE
 
             //  Generate Poly1305 key
 
-            KeyParameter polyKey = cipher(Key, coutunter, nonce);
-
             ContentKey = new KeyParameter(K);
+            ICipherParameters polyKey = new ParametersWithIV(ContentKey, IV);
+
+            poly = new Poly1305();
+            poly.Init(polyKey);
 
             //  Build the object to be hashed
 
-            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, getAADBytes());
+            byte[] aad = getAADBytes();
+            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, aad);
 
             cipher.Init(true, parameters);
 
-            byte[] C = new byte[cipher.GetOutputSize(rgbContent.Length)];
-            int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
-            len += cipher.DoFinal(C, len);
+            byte[] C = new byte[rgbContent.Length];
+            cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
 
-            Array.Resize(ref C, C.Length - (128 / 8) + (cbitTag / 8));
+            Array.Resize(ref C, C.Length + (cbitTag / 8));
+
+            poly.BlockUpdate(aad, 0, aad.Length);
+            byte[] zeros = new byte[16 - (aad.Length % 16)];
+            poly.BlockUpdate(zeros, 0, zeros.Length);
+            poly.BlockUpdate(rgbContent, 0, rgbContent.Length);
+            zeros = new byte[16 - (rgbContent.Length % 16)];
+            poly.BlockUpdate(zeros, 0, zeros.Length);
+            byte[] lengths;
+            lengths = BitConverter.GetBytes(aad.Length);
+            poly.BlockUpdate(lengths, 0, lengths.Length);
+            lengths = BitConverter.GetBytes(rgbContent.Length);
+            poly.BlockUpdate(lengths, 0, lengths.Length);
+            poly.DoFinal(C, C.Length);
+
             rgbEncrypted = C;
 
             return K;
 
         }
-#endif
 
 #if FOR_EXAMPLES
         public byte[] getAADBytes()
@@ -833,6 +845,14 @@ namespace COSE
                     if (key[CoseKeyKeys.KeyType].AsInt32() != (int) GeneralValuesInt.KeyType_Octet) return null;
                     return key.AsBytes(CoseKeyParameterKeys.Octet_k);
 
+                case AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_256:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha256Digest());
+
+                case AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_512:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha512Digest());
+
                 case AlgorithmValuesInt.RSA_OAEP: return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
                 case AlgorithmValuesInt.RSA_OAEP_256: return RSA_OAEP_KeyUnwrap(key, new Sha256Digest());
 
@@ -853,19 +873,19 @@ namespace COSE
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 128, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 128, AlgorithmValues.AES_KW_128, new Sha256Digest());
                     return AES_KeyUnwrap(null, 128, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 192, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 192, AlgorithmValues.AES_KW_192, new Sha256Digest());
                     return AES_KeyUnwrap(null, 192, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 256, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 256, AlgorithmValues.AES_KW_256, new Sha256Digest());
                     return AES_KeyUnwrap(null, 256, rgbKey);
 
                 default:
@@ -884,12 +904,15 @@ namespace COSE
             if (rgbEncrypted == null) Encrypt();
 
             if (m_counterSignerList.Count() != 0) {
+                byte[] rgbProtected;
+                if (objProtected.Count > 0) rgbProtected = objProtected.EncodeToBytes();
+                else rgbProtected = new byte[0];
                 if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtected, rgbEncrypted));
                 }
                 else {
                     foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
+                        sig.EncodeToCBORObject(rgbProtected, rgbEncrypted);
                     }
                 }
             }
@@ -1437,7 +1460,7 @@ namespace COSE
 
         }
 
-        bool m_fUseCompressed = true;
+        public static bool FUseCompressed = true;
         private void ECDH_GenerateEphemeral()
         {
             X9ECParameters p = m_key.GetCurve();
@@ -1454,7 +1477,7 @@ namespace COSE
             epk.Add(CoseKeyParameterKeys.EC_Curve, m_key[CoseKeyParameterKeys.EC_Curve]);
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
 
-            if (m_fUseCompressed) {
+            if (FUseCompressed) {
                 byte[] rgbEncoded = priv.Q.Normalize().GetEncoded(true);
                 byte[] X = new byte[rgbEncoded.Length - 1];
                 Array.Copy(rgbEncoded, 1, X, 0, X.Length);
@@ -1504,23 +1527,12 @@ namespace COSE
             //  Get the curve
 
             X9ECParameters p =  key.GetCurve();
+            ECPoint pubPoint = epk.GetPoint();
+
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            CBORObject y = epk.AsCBOR()[CoseKeyParameterKeys.EC_Y];
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint;
 
-            if (y.Type == CBORType.Boolean) {
-                byte[] X = epk.AsBytes(CoseKeyParameterKeys.EC_X);
-                byte[] rgb = new byte[X.Length + 1];
-                Array.Copy(X, 0, rgb, 1, X.Length);
-                rgb[0] = (byte) (2 + (y.AsBoolean() ? 1 : 0));
-                pubPoint = p.Curve.DecodePoint(rgb);
-            }
-            else {
-                pubPoint = p.Curve.CreatePoint(epk.AsBigInteger(CoseKeyParameterKeys.EC_X), epk.AsBigInteger(CoseKeyParameterKeys.EC_Y));
-            }
-
-                            ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
+            ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
             ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger(CoseKeyParameterKeys.EC_D), parameters);
 
@@ -1551,20 +1563,26 @@ namespace COSE
             contextArray.Add(info);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_ID);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_Other);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
 
             //  third element is - Party V info
             info = CBORObject.NewArray();
             contextArray.Add(info);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_ID);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_nonce);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_Other);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
 
             //  fourth element is - Supplimental Public Info
             info = CBORObject.NewArray();
@@ -1899,12 +1917,15 @@ namespace COSE
             if (rgbEncrypted == null) throw new CoseException("Must call Encrypt first");
 
             if (m_counterSignerList.Count() != 0) {
+                CBORObject objX;
+                if (objProtected.Count > 0) objX = CBORObject.FromObject(objProtected.EncodeToBytes());
+                else objX = CBORObject.FromObject(new byte[0]);
                 if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtected, rgbEncrypted));
                 }
                 else {
                     foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
+                        sig.EncodeToCBORObject(rgbProtected, rgbEncrypted);
                     }
                 }
             }
@@ -1999,26 +2020,31 @@ namespace COSE
         public override CBORObject Encode()
         {
             CBORObject obj;
+            byte[] rgbProtect;
 
             if (rgbEncrypted == null) Encrypt();
-
-            if (m_counterSignerList.Count() != 0) {
-                if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
-                }
-                else {
-                    foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
-                    }
-                }
-            }
 
             obj = CBORObject.NewArray();
 
             if (objProtected.Count > 0) {
-                obj.Add(objProtected.EncodeToBytes());
+                rgbProtect = objProtected.EncodeToBytes();
             }
-            else obj.Add(CBORObject.FromObject(new byte[0]));
+            else {
+                rgbProtect = new byte[0];
+            }
+            obj.Add(rgbProtect);
+
+            if (m_counterSignerList.Count() != 0) {
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtect, rgbEncrypted));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(rgbProtect, rgbEncrypted);
+                    }
+                }
+            }
+
 
             obj.Add(objUnprotected); // Add unprotected attributes
 
