@@ -27,227 +27,24 @@ using System.Diagnostics;
 
 namespace COSE
 {
-    public class EnvelopeMessage : Message
+    public abstract class EncryptCommon : Message
     {
         protected CBORObject obj;
-        string context = "Enveloped";
+        protected string context;
 
-        protected List<Recipient> recipientList = new List<Recipient>();
         protected byte[] rgbEncrypted;
         protected byte[] rgbContent;
-
-#if FOR_EXAMPLES
         byte[] m_cek;
-#endif // FOR_EXAMPLES
 
-        public EnvelopeMessage()
+        public EncryptCommon(Boolean fEmitTag, Boolean fEmitContent) : base(fEmitTag, fEmitContent) { }
+
+        protected void DecryptWithKey(byte[] CEK)
         {
-            m_tag = Tags.Enveloped;
-        }
-
-        public List<Recipient> RecipientList
-        {
-            get { return recipientList; }
-        } 
-
-        public void AddRecipient(Recipient recipient)
-        {
-            recipient.SetContext( "Env_Recipient");
-            recipientList.Add(recipient);
-        }
-
-        public void DecodeFromCBORObject(CBORObject obj, int index, int size)
-        {
-#if USE_ARRAY
-            if (size < 5) throw new CoseException("Invalid Encryption structure");
-
-            //  Protected values.
-            if (obj[index + 0].Type == CBORType.ByteString) {
-                objProtected = CBORObject.DecodeFromBytes(obj[index + 0].GetByteString());
-                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
-            }
-            else if (obj[index + 0].IsNull) {
-                objProtected = CBORObject.NewMap();
-            }
-            else {
-                throw new CoseException("Invalid Encryption structure");
-            }
-
-            //  Unprotected attributes
-            if (obj[index + 1].Type == PeterO.Cbor.CBORType.Map) objUnprotected = obj[index + 1];
-            else if (obj[index + 1].IsNull) objUnprotected = PeterO.Cbor.CBORObject.NewMap();
-            else throw new CoseException("Invalid Encryption Structure");
-
-            // Cipher Text
-            if (obj[index + 2].Type == CBORType.ByteString) rgbEncrypted = obj[index + 3].GetByteString();
-            else if (!obj[index + 2].IsNull) {               // Detached content - will need to get externally
-                throw new CoseException("Invalid Encryption Structure");
-            }
-
-            // Recipients
-            if (obj[index + 3].IsNull && (size == 5)) ; // No Recipient structures - this is just fine
-            else if (obj[index + 3].Type == CBORType.Array) {
-                // An array of recipients to be processed
-                for (int i = 0; i < obj[index + 4].Count; i++) {
-                    Recipient recip = new Recipient();
-                    recip.DecodeFromCBORObject(obj[index + 3][i], 0, obj[index + 4][i].Count);
-                    recipientList.Add(recip);
-                }
-            }
-            else {
-                //  We are going to assume that this is a single recipient
-                Recipient recip = new Recipient();
-                recip.DecodeFromCBORObject(obj, index + 3, size - 4);
-                recipientList.Add(recip);
-            }
-#else
-            CBORObject tmp;
-
-            //  Protected values.
-            tmp = obj[RecordKeys.Protected];
-            if (tmp != null) {
-                if (tmp.Type == CBORType.ByteString) {
-                    objProtected = CBORObject.DecodeFromBytes(tmp.GetByteString());
-                    if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
-                }
-                else {
-                    throw new CoseException("Invalid Encryption structure");
-                }
-            }
-
-            //  Unprotected attributes
-            tmp = obj[RecordKeys.Unprotected];
-            if (tmp != null) {
-                if (tmp.Type == PeterO.Cbor.CBORType.Map) objUnprotected = tmp;
-                else throw new CoseException("Invalid Encryption Structure");
-            }
-
-            // Cipher Text
-            tmp = obj[RecordKeys.CipherText];
-            if (tmp != null) {
-                if (obj[index + 3].Type == CBORType.ByteString) rgbEncrypted = tmp.GetByteString();
-            }
-
-            // Recipients
-            tmp = obj[RecordKeys.Recipients];
-            if (tmp != null) {
-                if (tmp.Type == CBORType.Array) {
-                    // An array of recipients to be processed
-                    for (int i = 0; i < tmp.Count; i++) {
-                        Recipient recip = new Recipient();
-                        recip.DecodeFromCBORObject(tmp[i], 0, tmp[i].Count);
-                        recipientList.Add(recip);
-                    }
-                }
-                else throw new CoseException("Invalid Encryption Structure"); 
-            }
-#endif
-        }
-
-
-        public override CBORObject Encode()
-        {
-            CBORObject obj;
-            
-            if (rgbEncrypted == null) Encrypt();
-
-            if (m_counterSignerList.Count() != 0) {
-                if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
-                }
-                else {
-                    foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
-                    }
-                }
-            }
-#if USE_ARRAY
-            obj = CBORObject.NewArray();
-
-            if (objProtected.Count > 0) {
-                obj.Add(objProtected.EncodeToBytes());
-            }
-            else obj.Add(CBORObject.FromObject(new byte[0]));
-
-            obj.Add(objUnprotected); // Add unprotected attributes
-
-            if (rgbEncrypted == null) obj.Add(new byte[0]);
-            else obj.Add(rgbEncrypted);      // Add ciphertext
-#else
-            obj = CBORObject.NewMap();
-
-            if (objProtected.Count > 0) obj.Add(RecordKeys.Protected, objProtected.EncodeToBytes());
-            if (objUnprotected.Count > 0) obj.Add(RecordKeys.Unprotected, objUnprotected);
-            if ((rgbEncrypted != null) && (rgbEncrypted.Length > 0)) obj.Add(RecordKeys.CipherText, rgbEncrypted);
-#endif
-
-            if ((recipientList.Count == 1) && !m_forceArray) {
-                CBORObject recipient = recipientList[0].Encode();
-
-                for (int i = 0; i < recipient.Count; i++) {
-                    obj.Add(recipient[i]);
-                }
-            }
-            else if (recipientList.Count > 0) {
-                CBORObject recipients = CBORObject.NewArray();
-
-                foreach (Recipient key in recipientList) {
-                    recipients.Add(key.Encode());
-                }
-#if USE_ARRAY
-                obj.Add(recipients);
-#else
-                obj.Add(RecordKeys.Recipients, recipients);
-#endif
-            }
-#if USE_ARRAY
-            else {
-                // obj.Add(null);      // No recipients - set to null
-            }
-#endif
-            return obj;
-        }
-
-        public virtual void Decrypt(Key key)
-        {
-            //  Get the CEK
-            byte[] CEK = null;
-            int cbitCEK = 0;
+            if (rgbEncrypted == null) throw new CoseException("No Encrypted Content supplied");
+            if (CEK == null) throw new CoseException("Null Key Supplied");
 
             CBORObject alg = FindAttribute(HeaderKeys.Algorithm);
-
-            if (alg.Type == CBORType.TextString) {
-                throw new CoseException("Algorithm not supported: " + alg.AsString());
-            }
-            else if (alg.Type == CBORType.Number) {
-                switch ((AlgorithmValuesInt) alg.AsInt32()) {
-                case AlgorithmValuesInt.AES_GCM_128:
-                    cbitCEK = 128;
-                    break;
-
-                case AlgorithmValuesInt.AES_GCM_192:
-                    cbitCEK = 192;
-                    break;
-
-                case AlgorithmValuesInt.AES_GCM_256:
-                    cbitCEK = 256;
-                    break;
-
-                default:
-                    throw new CoseException("Unknown or unimplemented algorithm");
-                }
-            }
-            else throw new CoseException("Algorithm incorrectly encoded");
-
-            foreach (Recipient recipient in recipientList) {
-                try {
-                    CEK = recipient.Decrypt(key, cbitCEK, alg);
-                }
-                catch (CoseException) { }
-            }
-            if (CEK == null) {
-                //  Generate a random CEK
-            }
+            if (alg == null) throw new CoseException("No Algorithm Specified");
 
             if (alg.Type == CBORType.TextString) {
                 throw new CoseException("Algorithm not supported " + alg.AsString());
@@ -259,48 +56,35 @@ namespace COSE
                 case AlgorithmValuesInt.AES_GCM_256:
                     AES_Decrypt(alg, CEK);
                     break;
+
+                case AlgorithmValuesInt.AES_CCM_16_64_128:
+                case AlgorithmValuesInt.AES_CCM_16_64_256:
+                case AlgorithmValuesInt.AES_CCM_16_128_128:
+                case AlgorithmValuesInt.AES_CCM_16_128_256:
+                case AlgorithmValuesInt.AES_CCM_64_64_128:
+                case AlgorithmValuesInt.AES_CCM_64_64_256:
+                case AlgorithmValuesInt.AES_CCM_64_128_128:
+                case AlgorithmValuesInt.AES_CCM_64_128_256:
+                    AES_CCM_Decrypt(alg, CEK);
+                    break;
                 }
+
             }
             else throw new CoseException("Algorithm incorrectly encoded");
-
         }
 
-        virtual public void Encrypt()
+        public void EncryptWithKey(byte[] ContentKey)
         {
             CBORObject alg;
 
-            //  Get the algorithm we are using - the default is AES GCM
+            alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) throw new CoseException("No Algorithm Specified");
 
-            try {
-                alg = FindAttribute(HeaderKeys.Algorithm);
-            }
-            catch {
-                alg = AlgorithmValues.AES_GCM_128;
-                AddUnprotected(HeaderKeys.Algorithm, alg);
-            }
+            if (ContentKey == null) throw new CoseException("Null Key Provided");
+            if (GetKeySize(alg) / 8 != ContentKey.Length) throw new CoseException("Incorrect Key Size");
 
-            byte[] ContentKey = null;
-
-            //  Determine if we are doing a direct encryption
-            int recipientTypes = 0;
-
-            foreach (Recipient key in recipientList) {
-                switch (key.recipientType) {
-                case RecipientType.direct:
-                case RecipientType.keyAgreeDirect:
-                    if ((recipientTypes & 1) != 0) throw new CoseException("It is not legal to have two direct recipients in a message");
-                    recipientTypes |= 1;
-                    ContentKey = key.GetKey(alg);
-                    break;
-
-                default:
-                    recipientTypes |= 2;
-                    break;
-                }
-            }
-
-            if (recipientTypes == 3) throw new CoseException("It is not legal to mix direct and indirect recipients in a message");
-
+            if (rgbContent == null) throw new CoseException("No Content Specified");
+    
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
                 case "A128CBC-HS256":
@@ -331,21 +115,13 @@ namespace COSE
                     ContentKey = AES_CCM(alg, ContentKey);
                     break;
 
-#if false
                 case AlgorithmValuesInt.ChaCha20_Poly1305:
                     ContentKey = ChaCha20_Poly1305(alg, ContentKey);
                     break;
-#endif
 
                 default:
                     throw new CoseException("Content encryption algorithm is not recognized");
                 }
-            }
-
- 
-            foreach (Recipient key in recipientList) {
-                key.SetContent(ContentKey);
-                key.Encrypt();
             }
 
 #if FOR_EXAMPLES
@@ -355,6 +131,13 @@ namespace COSE
             return;
         }
 
+        #if FOR_EXAMPLES
+        public byte[] getCEK()
+        {
+            return this.m_cek;
+        }
+#endif
+
         public byte[] GetContent()
         {
             return rgbContent;
@@ -362,7 +145,7 @@ namespace COSE
 
         public string GetContentAsString()
         {
-            return UTF8Encoding.ASCII.GetChars(rgbContent).ToString();
+            return UTF8Encoding.ASCII.GetString(rgbContent);
         }
 
         public void SetContent(byte[] keyBytes)
@@ -375,9 +158,51 @@ namespace COSE
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
         }
 
+        public byte[] GetEncryptedContent()
+        {
+            return rgbEncrypted;
+        }
+
+        public void SetEncryptedContent(byte[] rgb)
+        {
+            rgbEncrypted = rgb;
+        }
+
         public void SetContext(string newContext)
         {
             context = newContext;
+        }
+
+        public int GetKeySize(CBORObject alg)
+        {
+            if (alg.Type == CBORType.TextString) {
+                throw new CoseException("Unrecognized Algorithm Specified");
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.AES_GCM_128:
+                case AlgorithmValuesInt.AES_CCM_16_64_128:
+                case AlgorithmValuesInt.AES_CCM_16_128_128:
+                case AlgorithmValuesInt.AES_CCM_64_64_128:
+                case AlgorithmValuesInt.AES_CCM_64_128_128:
+                    return 128;
+
+                case AlgorithmValuesInt.AES_GCM_192:
+                    return 192;
+
+                case AlgorithmValuesInt.AES_GCM_256:
+                case AlgorithmValuesInt.AES_CCM_16_64_256:
+                case AlgorithmValuesInt.AES_CCM_16_128_256:
+                case AlgorithmValuesInt.AES_CCM_64_64_256:
+                case AlgorithmValuesInt.AES_CCM_64_128_256:
+                    return 256;
+
+                default:
+                    throw new CoseException("Unrecognized Algorithm Specified");
+                }
+
+            }
+            throw new CoseException("Invalid Algorithm Specified");
         }
 
         private byte[] AES(CBORObject alg, byte[] K)
@@ -457,7 +282,7 @@ namespace COSE
             CBORObject cbor = FindAttribute(HeaderKeys.IV);
             if (cbor == null) throw new Exception("Missing IV");
 
-                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorreclty formed.");
+                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorrectly formed.");
                 if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
                 Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
 
@@ -569,24 +394,113 @@ namespace COSE
             return K;
         }
 
-#if false
+        private void AES_CCM_Decrypt(CBORObject alg, byte[] K)
+        {
+            CcmBlockCipher cipher = new CcmBlockCipher(new AesFastEngine());
+            KeyParameter ContentKey;
+            int cbitTag = 64;
+            int cbIV;
+            int cbitKey;
+
+            //  Figure out what the correct internal parameters to use are
+
+            Debug.Assert(alg.Type == CBORType.Number);
+            switch ((AlgorithmValuesInt) alg.AsInt32()) {
+            case AlgorithmValuesInt.AES_CCM_16_64_128:
+            case AlgorithmValuesInt.AES_CCM_64_64_128:
+                cbitKey = 128;
+                cbitTag = 64;
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_16_128_128:
+            case AlgorithmValuesInt.AES_CCM_64_128_128:
+                cbitKey = 128;
+                cbitTag = 128;
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_16_64_256:
+            case AlgorithmValuesInt.AES_CCM_64_64_256:
+                cbitKey = 256;
+                cbitTag = 64;
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_16_128_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_256:
+                cbitKey = 256;
+                cbitTag = 128;
+                break;
+
+            default:
+                throw new CoseException("Unsupported algorithm: " + alg);
+            }
+
+            switch ((AlgorithmValuesInt) alg.AsInt32()) {
+            case AlgorithmValuesInt.AES_CCM_16_64_128:
+            case AlgorithmValuesInt.AES_CCM_16_64_256:
+            case AlgorithmValuesInt.AES_CCM_16_128_128:
+            case AlgorithmValuesInt.AES_CCM_16_128_256:
+                cbIV = 15 - 2;
+                break;
+
+            case AlgorithmValuesInt.AES_CCM_64_64_128:
+            case AlgorithmValuesInt.AES_CCM_64_64_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_256:
+            case AlgorithmValuesInt.AES_CCM_64_128_128:
+                cbIV = 15 - 8;
+                break;
+
+            default:
+                throw new CoseException("Unsupported algorithm: " + alg);
+            }
+
+            //  The requirements from JWA
+
+            byte[] IV = new byte[cbIV];
+            CBORObject cbor = FindAttribute(HeaderKeys.IV);
+            if (cbor != null) {
+                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorrectly formed.");
+                if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
+                Array.Copy(cbor.GetByteString(), 0, IV, 0, IV.Length);
+            }
+            else {
+                s_PRNG.NextBytes(IV);
+                AddUnprotected(HeaderKeys.IV, CBORObject.FromObject(IV));
+            }
+
+            if (K == null) throw new CoseException("Internal error");
+            if (K.Length != cbitKey / 8) throw new CoseException("Incorrect key length");
+
+            ContentKey = new KeyParameter(K);
+
+            //  Build the object to be hashed
+
+            AeadParameters parameters = new AeadParameters(ContentKey, cbitTag, IV, getAADBytes());
+
+            cipher.Init(false, parameters);
+            byte[] C = new byte[cipher.GetOutputSize(rgbEncrypted.Length)];
+            int len = cipher.ProcessBytes(rgbEncrypted, 0, rgbEncrypted.Length, C, 0);
+            len += cipher.DoFinal(C, len);
+
+            rgbContent = C;
+        }
+
         private byte[] ChaCha20_Poly1305(CBORObject alg, byte[] K)
         {
             ChaChaEngine cipher = new ChaChaEngine();
-            Poly1305 poly = new Poly1305();
+            Poly1305 poly;
 
             KeyParameter ContentKey;
-            int cbitTag = 64;
+            int cbitTag = 128;
 
             //  The requirements from JWA
             //  IV is 96 bits
             //  Authentication tag is 128 bits
-            //  key sizes are 128, 192 and 256 bits
+            //  key size is 256 bits
 
             byte[] IV = new byte[96 / 8];
             CBORObject cbor = FindAttribute(HeaderKeys.IV);
             if (cbor != null) {
-                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorreclty formed.");
+                if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorrectly formed.");
                 if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
                 Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
             }
@@ -611,27 +525,42 @@ namespace COSE
 
             //  Generate Poly1305 key
 
-            KeyParameter polyKey = cipher(Key, coutunter, nonce);
-
             ContentKey = new KeyParameter(K);
+            ICipherParameters polyKey = new ParametersWithIV(ContentKey, IV);
+
+            poly = new Poly1305();
+            poly.Init(polyKey);
 
             //  Build the object to be hashed
 
-            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, getAADBytes());
+            byte[] aad = getAADBytes();
+            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, aad);
 
             cipher.Init(true, parameters);
 
-            byte[] C = new byte[cipher.GetOutputSize(rgbContent.Length)];
-            int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
-            len += cipher.DoFinal(C, len);
+            byte[] C = new byte[rgbContent.Length];
+            cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
 
-            Array.Resize(ref C, C.Length - (128 / 8) + (cbitTag / 8));
+            Array.Resize(ref C, C.Length + (cbitTag / 8));
+
+            poly.BlockUpdate(aad, 0, aad.Length);
+            byte[] zeros = new byte[16 - (aad.Length % 16)];
+            poly.BlockUpdate(zeros, 0, zeros.Length);
+            poly.BlockUpdate(rgbContent, 0, rgbContent.Length);
+            zeros = new byte[16 - (rgbContent.Length % 16)];
+            poly.BlockUpdate(zeros, 0, zeros.Length);
+            byte[] lengths;
+            lengths = BitConverter.GetBytes(aad.Length);
+            poly.BlockUpdate(lengths, 0, lengths.Length);
+            lengths = BitConverter.GetBytes(rgbContent.Length);
+            poly.BlockUpdate(lengths, 0, lengths.Length);
+            poly.DoFinal(C, C.Length);
+
             rgbEncrypted = C;
 
             return K;
 
         }
-#endif
 
 #if FOR_EXAMPLES
         public byte[] getAADBytes()
@@ -646,10 +575,6 @@ namespace COSE
             return obj.EncodeToBytes();
         }
 
-        public byte[] getCEK()
-        {
-            return this.m_cek;
-        }
 #endif // FOR_EXAMPLES
     }
 
@@ -658,13 +583,14 @@ namespace COSE
         direct=1, keyAgree=2, keyTransport=3, keyWrap=4, keyAgreeDirect=5, keyTransportAndWrap=6, password=7
     }
 
-    public class Recipient : EnvelopeMessage
+    public class Recipient : EncryptCommon
     {
         RecipientType m_recipientType;
         Key m_key;
         Key m_senderKey;
+        List<Recipient> recipientList = new List<Recipient>();
 
-        public Recipient(Key key, CBORObject algorithm = null)
+        public Recipient(Key key, CBORObject algorithm = null) : base(true, true)
         {
             if (algorithm != null) {
                 if (algorithm.Type == CBORType.TextString) {
@@ -816,15 +742,70 @@ namespace COSE
                 }
 
                 if (key[CoseKeyKeys.KeyIdentifier] != null) AddUnprotected(HeaderKeys.KeyId, key[CoseKeyKeys.KeyIdentifier]);
+
+                SetContext("Rec_Recipient");
             }
         }
 
-        public Recipient()
+        public Recipient() : base(true, true)
         {
+        }
+
+        public List<Recipient> RecipientList
+        {
+            get { return recipientList; }
         }
 
         public RecipientType recipientType { get { return m_recipientType; } }
 
+        public void AddRecipient(Recipient recipient)
+        {
+            recipient.SetContext("Enc_Recipient");
+            recipientList.Add(recipient);
+        }
+
+        public void DecodeFromCBORObject(CBORObject obj)
+        {
+            if ((obj.Count != 3) && (obj.Count != 4)) throw new CoseException("Invalid Encryption structure");
+
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                if (obj[0].GetByteString().Length == 0) objProtected = CBORObject.NewMap();
+                else objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
+            }
+            else {
+                throw new CoseException("Invalid Encryption structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid Encryption Structure");
+
+            // Cipher Text
+            if (obj[2].Type == CBORType.ByteString) rgbEncrypted = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid Encryption Structure");
+            }
+
+            // Recipients
+            if (obj.Count == 4) {
+                if (obj[3].Type == CBORType.Array) {
+                    // An array of recipients to be processed
+                    for (int i = 0; i < obj[3].Count; i++) {
+                        Recipient recip = new Recipient();
+                        recip.DecodeFromCBORObject(obj[3][i]);
+                        recipientList.Add(recip);
+                    }
+                }
+                else throw new CoseException("Invalid Encryption Structure");
+            }
+        }
+
+        public byte[] Decrypt(int cbitCEK, CBORObject algCEK)
+        {
+            return Decrypt(m_key, cbitCEK, algCEK);
+        }
 
         public byte[] Decrypt(Key key, int cbitCEK, CBORObject algCEK)
         {
@@ -832,18 +813,13 @@ namespace COSE
             byte[] rgbSecret;
             byte[] rgbKey;
 
-            try {
-                alg = FindAttribute(HeaderKeys.Algorithm);
-            }
-            catch (CoseException) {
-                return null;   // This is a bad state
-            }
+            alg = FindAttribute(HeaderKeys.Algorithm);
+
+            if (alg == null) return null;
+            if (key == null) return null;
 
             if (alg.Type == CBORType.TextString) {
                 switch (alg.AsString()) {
-                case "dir":
-                    if (key.AsString("kty") != "oct") return null;
-                    return key.AsBytes(CoseKeyParameterKeys.Octet_k);
 
                 case "A128GCMKW": return AES_GCM_KeyUnwrap(key, 128);
                 case "A192GCMKW": return AES_GCM_KeyUnwrap(key, 192);
@@ -865,6 +841,18 @@ namespace COSE
             }
             else if (alg.Type == CBORType.Number) {
                 switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.DIRECT:
+                    if (key[CoseKeyKeys.KeyType].AsInt32() != (int) GeneralValuesInt.KeyType_Octet) return null;
+                    return key.AsBytes(CoseKeyParameterKeys.Octet_k);
+
+                case AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_256:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha256Digest());
+
+                case AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_512:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha512Digest());
+
                 case AlgorithmValuesInt.RSA_OAEP: return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
                 case AlgorithmValuesInt.RSA_OAEP_256: return RSA_OAEP_KeyUnwrap(key, new Sha256Digest());
 
@@ -885,19 +873,19 @@ namespace COSE
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_128:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 128, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 128, AlgorithmValues.AES_KW_128, new Sha256Digest());
                     return AES_KeyUnwrap(null, 128, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_192:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 192, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 192, AlgorithmValues.AES_KW_192, new Sha256Digest());
                     return AES_KeyUnwrap(null, 192, rgbKey);
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256_AES_KW_256:
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
                     rgbSecret = ECDH_GenerateSecret(key);
-                    rgbKey = HKDF(rgbSecret, 256, alg, new Sha256Digest());
+                    rgbKey = HKDF(rgbSecret, 256, AlgorithmValues.AES_KW_256, new Sha256Digest());
                     return AES_KeyUnwrap(null, 256, rgbKey);
 
                 default:
@@ -909,7 +897,60 @@ namespace COSE
             return null;
         }
 
-        override public void Encrypt()
+        override public CBORObject Encode()
+        {
+            CBORObject obj;
+
+            if (rgbEncrypted == null) Encrypt();
+
+            if (m_counterSignerList.Count() != 0) {
+                byte[] rgbProtected;
+                if (objProtected.Count > 0) rgbProtected = objProtected.EncodeToBytes();
+                else rgbProtected = new byte[0];
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtected, rgbEncrypted));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(rgbProtected, rgbEncrypted);
+                    }
+                }
+            }
+
+            obj = CBORObject.NewArray();
+
+            if (objProtected.Count > 0) {
+                obj.Add(objProtected.EncodeToBytes());
+            }
+            else obj.Add(CBORObject.FromObject(new byte[0]));
+
+            obj.Add(objUnprotected); // Add unprotected attributes
+
+            if (rgbEncrypted == null) obj.Add(new byte[0]);
+            else obj.Add(rgbEncrypted);      // Add ciphertext
+
+            if ((recipientList.Count == 1) && !m_forceArray) {
+                CBORObject recipient = recipientList[0].Encode();
+
+                for (int i = 0; i < recipient.Count; i++) {
+                    obj.Add(recipient[i]);
+                }
+            }
+            else if (recipientList.Count > 0) {
+                CBORObject recipients = CBORObject.NewArray();
+
+                foreach (Recipient key in recipientList) {
+                    recipients.Add(key.Encode());
+                }
+                obj.Add(recipients);
+            }
+            else {
+                // obj.Add(null);      // No recipients - set to null
+            }
+            return obj;
+        }
+
+        public void Encrypt()
         {
             CBORObject alg;      // Get the algorithm that was set.
             byte[] rgbSecret;
@@ -1068,6 +1109,26 @@ namespace COSE
                     rgbSecret = ECDH_GenerateSecret(m_key);
                     rgbKey = HKDF(rgbSecret, 128, AlgorithmValues.AES_KW_128, new Sha256Digest());
                     AES_KeyWrap(128, rgbKey);
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
+                    break;
+
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorith");
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = HKDF(rgbSecret, 192, AlgorithmValues.AES_KW_192, new Sha256Digest());
+                    AES_KeyWrap(192, rgbKey);
+#if FOR_EXAMPLES
+                    m_kek = rgbKey;
+#endif
+                    break;
+
+                case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
+                    if (rgbKey != null) throw new CoseException("Can't wrap around this algorith");
+                    rgbSecret = ECDH_GenerateSecret(m_key);
+                    rgbKey = HKDF(rgbSecret, 256, AlgorithmValues.AES_KW_256, new Sha256Digest());
+                    AES_KeyWrap(256, rgbKey);
 #if FOR_EXAMPLES
                     m_kek = rgbKey;
 #endif
@@ -1255,6 +1316,11 @@ namespace COSE
             throw new CoseException("NYI");
         }
 
+        public void SetKey(COSE.Key recipientKey)
+        {
+            m_key = recipientKey;
+        }
+
         public void SetSenderKey(COSE.Key senderKey)
         {
             m_senderKey = senderKey;
@@ -1394,6 +1460,7 @@ namespace COSE
 
         }
 
+        public static bool FUseCompressed = true;
         private void ECDH_GenerateEphemeral()
         {
             X9ECParameters p = m_key.GetCurve();
@@ -1409,8 +1476,18 @@ namespace COSE
             epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
             epk.Add(CoseKeyParameterKeys.EC_Curve, m_key[CoseKeyParameterKeys.EC_Curve]);
             ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add(CoseKeyParameterKeys.EC_X, PadBytes(priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
-            epk.Add(CoseKeyParameterKeys.EC_Y, PadBytes(priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
+
+            if (FUseCompressed) {
+                byte[] rgbEncoded = priv.Q.Normalize().GetEncoded(true);
+                byte[] X = new byte[rgbEncoded.Length - 1];
+                Array.Copy(rgbEncoded, 1, X, 0, X.Length);
+                epk.Add(CoseKeyParameterKeys.EC_X, CBORObject.FromObject(X));
+                epk.Add(CoseKeyParameterKeys.EC_Y, CBORObject.FromObject((rgbEncoded[0] & 1) == 1));
+            }
+            else {
+                epk.Add(CoseKeyParameterKeys.EC_X, PadBytes(priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
+                epk.Add(CoseKeyParameterKeys.EC_Y, PadBytes(priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
+            }
             AddUnprotected(HeaderKeys.EphemeralKey, epk);
         }
 
@@ -1434,19 +1511,27 @@ namespace COSE
                 epk = m_senderKey;
             }
             else {
-                CBORObject epkT = FindAttribute(HeaderKeys.EphemeralKey);
-                if (epkT == null) throw new CoseException("No Ephemeral key");
-                epk = new Key(epkT);
+                CBORObject spkT = FindAttribute(HeaderKeys.StaticKey);
+                if (spkT != null) {
+                    epk = new Key(spkT);
+                }
+                else {
+                    CBORObject epkT = FindAttribute(HeaderKeys.EphemeralKey);
+                    if (epkT == null) throw new CoseException("No Ephemeral key");
+                    epk = new Key(epkT);
+                }
             }
 
-            if (epk[CoseKeyParameterKeys.EC_Curve] != key[CoseKeyParameterKeys.EC_Curve]) throw new CoseException("not a match of curves");
+            if (epk[CoseKeyParameterKeys.EC_Curve].AsInt32() != key[CoseKeyParameterKeys.EC_Curve].AsInt32()) throw new CoseException("not a match of curves");
 
             //  Get the curve
 
             X9ECParameters p =  key.GetCurve();
+            ECPoint pubPoint = epk.GetPoint();
+
             ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger(CoseKeyParameterKeys.EC_X), epk.AsBigInteger(CoseKeyParameterKeys.EC_Y));
+
             ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
             ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger(CoseKeyParameterKeys.EC_D), parameters);
@@ -1478,20 +1563,26 @@ namespace COSE
             contextArray.Add(info);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_ID);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_Other);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
 
             //  third element is - Party V info
             info = CBORObject.NewArray();
             contextArray.Add(info);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_ID);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_nonce);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
             obj = FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyV_Other);
             if (obj != null) info.Add(obj);
+            else info.Add(CBORObject.Null);
 
             //  fourth element is - Supplimental Public Info
             info = CBORObject.NewArray();
@@ -1780,27 +1871,61 @@ namespace COSE
 #endif // FOR_EXAMPLES
     }
 
-    public class EncryptMessage : EnvelopeMessage
+    public class EncryptMessage : EncryptCommon
     {
-        public EncryptMessage() : base()
+        public EncryptMessage() : base(true, true)
         {
-            SetContext("Encrypted");
+            context = "Encrypt1";
             m_tag = Tags.Encrypted;
+        }
+
+        public EncryptMessage(bool fEmitTag, bool fEmitContent) :base(fEmitTag, fEmitContent)
+        {
+            context = "Encrypted";
+            m_tag = Tags.Encrypted;
+        }
+
+        virtual public void DecodeFromCBORObject(CBORObject obj)
+        {
+            if (obj.Count != 3) throw new CoseException("Invalid Encryption structure");
+
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                if (obj[0].GetByteString().Length == 0) objProtected = CBORObject.NewMap();
+                else objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
+            }
+            else {
+                throw new CoseException("Invalid Encryption structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid Encryption Structure");
+
+            // Cipher Text
+            if (obj[2].Type == CBORType.ByteString) rgbEncrypted = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid Encryption Structure");
+            }
         }
 
         public override CBORObject Encode()
         {
             CBORObject obj;
 
-            if (rgbEncrypted == null) Encrypt();
+            if (rgbEncrypted == null) throw new CoseException("Must call Encrypt first");
 
             if (m_counterSignerList.Count() != 0) {
+                CBORObject objX;
+                if (objProtected.Count > 0) objX = CBORObject.FromObject(objProtected.EncodeToBytes());
+                else objX = CBORObject.FromObject(new byte[0]);
                 if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbEncrypted));
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtected, rgbEncrypted));
                 }
                 else {
                     foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbEncrypted);
+                        sig.EncodeToCBORObject(rgbProtected, rgbEncrypted);
                     }
                 }
             }
@@ -1813,10 +1938,227 @@ namespace COSE
 
             obj.Add(objUnprotected); // Add unprotected attributes
 
-            if (rgbEncrypted == null) obj.Add(new byte[0]);
-            else obj.Add(rgbEncrypted);      // Add ciphertext
+            if (m_emitContent) obj.Add(rgbEncrypted);      // Add ciphertext
+            else obj.Add(CBORObject.Null);
 
             return obj;
         }
+
+        public byte[] Decrypt(byte[] rgbKey)
+        {
+            DecryptWithKey(rgbKey);
+            return rgbContent;
+        }
+
+        public void Encrypt(byte[] rgbKey)
+        {
+            EncryptWithKey(rgbKey);
+        }
     }
+
+    public class EnvelopedMessage : EncryptCommon
+    {
+        protected List<Recipient> recipientList = new List<Recipient>();
+
+#if FOR_EXAMPLES
+        byte[] m_cek;
+#endif // FOR_EXAMPLES
+
+        public EnvelopedMessage() : base(true, true)
+        {
+            context = "Encrypt";
+            m_tag = Tags.Enveloped;
+        }
+
+        public EnvelopedMessage(Boolean emitTag, Boolean emitContent) : base(emitTag, emitContent)
+        {
+            context = "Enveloped";
+            m_tag = Tags.Enveloped;
+        }
+
+        public List<Recipient> RecipientList
+        {
+            get { return recipientList; }
+        }
+
+        virtual public void DecodeFromCBORObject(CBORObject obj)
+        {
+            if (obj.Count != 4) throw new CoseException("Invalid Encryption structure");
+
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                if (obj[0].GetByteString().Length == 0) objProtected = CBORObject.NewMap();
+                else objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
+                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid Encryption Structure");
+            }
+            else {
+                throw new CoseException("Invalid Encryption structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid Encryption Structure");
+
+            // Cipher Text
+            if (obj[2].Type == CBORType.ByteString) rgbEncrypted = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid Encryption Structure");
+            }
+
+            // Recipients
+            if (obj[3].Type == CBORType.Array) {
+                // An array of recipients to be processed
+                for (int i = 0; i < obj[3].Count; i++) {
+                    Recipient recip = new Recipient();
+                    recip.DecodeFromCBORObject(obj[3][i]);
+                    recipientList.Add(recip);
+                }
+            }
+            else throw new CoseException("Invalid Encryption Structure");
+        }
+
+        public override CBORObject Encode()
+        {
+            CBORObject obj;
+            byte[] rgbProtect;
+
+            if (rgbEncrypted == null) Encrypt();
+
+            obj = CBORObject.NewArray();
+
+            if (objProtected.Count > 0) {
+                rgbProtect = objProtected.EncodeToBytes();
+            }
+            else {
+                rgbProtect = new byte[0];
+            }
+            obj.Add(rgbProtect);
+
+            if (m_counterSignerList.Count() != 0) {
+                if (m_counterSignerList.Count() == 1) {
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtect, rgbEncrypted));
+                }
+                else {
+                    foreach (CounterSignature sig in m_counterSignerList) {
+                        sig.EncodeToCBORObject(rgbProtect, rgbEncrypted);
+                    }
+                }
+            }
+
+
+            obj.Add(objUnprotected); // Add unprotected attributes
+
+            if (!m_emitContent) obj.Add(CBORObject.Null);
+            else obj.Add(rgbEncrypted);      // Add ciphertext
+
+            if ((recipientList.Count == 1) && !m_forceArray) {
+                CBORObject recipient = recipientList[0].Encode();
+
+                for (int i = 0; i < recipient.Count; i++) {
+                    obj.Add(recipient[i]);
+                }
+            }
+            else if (recipientList.Count > 0) {
+                CBORObject recipients = CBORObject.NewArray();
+
+                foreach (Recipient key in recipientList) {
+                    recipients.Add(key.Encode());
+                }
+                obj.Add(recipients);
+            }
+            else {
+                // obj.Add(null);      // No recipients - set to null
+            }
+            return obj;
+        }
+
+        public void AddRecipient(Recipient recipient)
+        {
+            recipient.SetContext("Env_Recipient");
+            recipientList.Add(recipient);
+        }
+
+        public virtual void Decrypt(Recipient recipientIn)
+        {
+            //  Get the CEK
+            byte[] CEK = null;
+            int cbitCEK = 0;
+
+            CBORObject alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) throw new CoseException("No Algorithm Specified");
+
+            cbitCEK = GetKeySize(alg);
+
+            foreach (Recipient recipient in recipientList) {
+                try {
+                    if (recipient == recipientIn) {
+                        CEK = recipient.Decrypt(cbitCEK, alg);
+                    }
+                    else if (recipientIn == null) {
+                        CEK = recipient.Decrypt(cbitCEK, alg);
+                    }
+                }
+                catch (CoseException) { }
+                if (CEK != null) break;
+            }
+
+            if (CEK == null) {
+                throw new CoseException("No Recipient information found");
+            }
+
+            DecryptWithKey(CEK);
+        }
+
+        virtual public void Encrypt()
+        {
+            CBORObject alg;
+
+            //  Get the algorithm we are using - the default is AES GCM
+
+            alg = FindAttribute(HeaderKeys.Algorithm);
+            if (alg == null) throw new CoseException("No Algorithm Specified");
+
+            /*
+            if (alg == null) {
+                alg = AlgorithmValues.AES_GCM_128;
+                AddProtected(HeaderKeys.Algorithm, alg);
+            }
+            */
+
+            byte[] ContentKey = null;
+
+            //  Determine if we are doing a direct encryption
+            int recipientTypes = 0;
+
+            foreach (Recipient key in recipientList) {
+                switch (key.recipientType) {
+                case RecipientType.direct:
+                case RecipientType.keyAgreeDirect:
+                    if ((recipientTypes & 1) != 0) throw new CoseException("It is not legal to have two direct recipients in a message");
+                    recipientTypes |= 1;
+                    ContentKey = key.GetKey(alg);
+                    break;
+
+                default:
+                    recipientTypes |= 2;
+                    break;
+                }
+            }
+
+            if (recipientTypes == 3) throw new CoseException("It is not legal to mix direct and indirect recipients in a message");
+            if (recipientTypes == 0) throw new CoseException("No Recipients Specified");
+
+            if (ContentKey == null) {
+                ContentKey = new byte[GetKeySize(alg) / 8];
+                s_PRNG.NextBytes(ContentKey);
+            }
+            EncryptWithKey(ContentKey);
+
+            foreach (Recipient key in recipientList) {
+                key.SetContent(ContentKey);
+                key.Encrypt();
+            }
+        }
+    }
+
 }
