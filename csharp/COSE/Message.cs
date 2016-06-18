@@ -40,7 +40,7 @@ namespace COSE
         static public readonly CBORObject KeyId = CBORObject.FromObject(4);
         static public readonly CBORObject IV = CBORObject.FromObject(5);
         static public readonly CBORObject PartialIV = CBORObject.FromObject(6);
-        static public readonly CBORObject CounterSign = CBORObject.FromObject(7);
+        static public readonly CBORObject CounterSignature = CBORObject.FromObject(7);
         static public readonly CBORObject OperationTime = CBORObject.FromObject(8);
     }
 
@@ -254,11 +254,26 @@ namespace COSE
             case Tags.Unknown:
                 throw new CoseException("Message was not tagged and no default tagging option given");
 
+            case Tags.Signed:
+                SignMessage sig = new SignMessage();
+                sig.DecodeFromCBORObject(messageObject);
+                return sig;
+
+            case Tags.Signed0:
+                Sign0Message sig0 = new Sign0Message();
+                sig0.DecodeFromCBORObject(messageObject);
+                return sig0;
+            
             case Tags.MAC: {
                     MACMessage mac = new MACMessage();
                     mac.DecodeFromCBORObject(messageObject);
                     return mac;
                 }
+
+            case Tags.MAC0:
+                MAC0Message mac0 = new MAC0Message();
+                mac0.DecodeFromCBORObject(messageObject);
+                return mac0;
 
             case Tags.Enveloped:         // It is an encrytion message
                 EnvelopedMessage enc = new EnvelopedMessage();
@@ -328,6 +343,7 @@ namespace COSE
         protected CBORObject objUnprotected = CBORObject.NewMap();
         protected CBORObject objDontSend = CBORObject.NewMap();
         protected byte[] externalData = new byte[0];
+        protected byte[] rgbProtected;
 
         public void AddAttribute(string name, string value, bool fProtected)
         {

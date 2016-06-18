@@ -29,7 +29,7 @@ namespace COSE
             m_tag = Tags.Signed;
         }
 
-        public List<Signer> SignerList {  get { return signerList; } }
+        public List<Signer> SignerList { get { return signerList; } }
 
         public void AddSigner(Signer sig)
         {
@@ -65,25 +65,68 @@ namespace COSE
             return obj;
         }
 
+        virtual public void DecodeFromCBORObject(CBORObject obj)
+        {
+            if (obj.Count != 4) throw new CoseException("Invalid SignMessage structure");
+
+            //  Protected values.
+            if (obj[0].Type == CBORType.ByteString) {
+                rgbProtected = obj[0].GetByteString();
+                if (rgbProtected.Length == 0) objProtected = CBORObject.NewMap();
+                else {
+                    objProtected = CBORObject.DecodeFromBytes(rgbProtected);
+                    if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid SignMessage Structure");
+                    if (objProtected.Count == 0) rgbProtected = new byte[0];
+                }
+            }
+            else {
+                throw new CoseException("Invalid SignMessage structure");
+            }
+
+            //  Unprotected attributes
+            if (obj[1].Type == CBORType.Map) objUnprotected = obj[1];
+            else throw new CoseException("Invalid SignMessage Structure");
+
+            // Plain Text
+            if (obj[2].Type == CBORType.ByteString) rgbContent = obj[2].GetByteString();
+            else if (!obj[2].IsNull) {               // Detached content - will need to get externally
+                throw new CoseException("Invalid SignMessage Structure");
+            }
+
+            // Signers
+            if (obj[3].Type != CBORType.Array) throw new CoseException("Invalid SignMessage Structure");
+            // An array of signers to be processed
+            for (int i = 0; i < obj[3].Count; i++) {
+                Signer recip = new Signer();
+                recip.DecodeFromCBORObject(obj[3][i]);
+                signerList.Add(recip);
+            }
+
+        }
+
         public override CBORObject Encode()
         {
             CBORObject obj;
+            byte[] rgbProtected;
 
-#if USE_ARRAY
             obj = CBORObject.NewArray();
 
             if ((objProtected != null) && (objProtected.Count > 0)) {
-                obj.Add(objProtected.EncodeToBytes());
+                rgbProtected = objProtected.EncodeToBytes();
+                obj.Add(rgbProtected);
             }
-            else obj.Add(new byte[0]);
+            else {
+                rgbProtected = new byte[0];
+                obj.Add(rgbProtected);
+            }
 
             if (m_counterSignerList.Count() != 0) {
                 if (m_counterSignerList.Count() == 1) {
-                    AddUnprotected(HeaderKeys.CounterSign, m_counterSignerList[0].EncodeToCBORObject(objProtected, rgbContent));
+                    AddUnprotected(HeaderKeys.CounterSignature, m_counterSignerList[0].EncodeToCBORObject(rgbProtected, rgbContent));
                 }
                 else {
                     foreach (CounterSignature sig in m_counterSignerList) {
-                        sig.EncodeToCBORObject(objProtected, rgbContent);
+                        sig.EncodeToCBORObject(rgbProtected, rgbContent);
                     }
                 }
             }
@@ -94,7 +137,7 @@ namespace COSE
             obj.Add(rgbContent);
 
             if ((signerList.Count == 1) && !this.m_forceArray) {
-                CBORObject recipient = signerList[0].EncodeToCBORObject(obj[0], rgbContent);
+                CBORObject recipient = signerList[0].EncodeToCBORObject(obj[0].EncodeToBytes(), rgbContent);
 
                 for (int i = 0; i < recipient.Count; i++) {
                     obj.Add(recipient[i]);
@@ -104,36 +147,13 @@ namespace COSE
                 CBORObject signers = CBORObject.NewArray();
 
                 foreach (Signer key in signerList) {
-                    signers.Add(key.EncodeToCBORObject(obj[0], rgbContent));
+                    signers.Add(key.EncodeToCBORObject(rgbProtected, rgbContent));
                 }
                 obj.Add(signers);
             }
             else {
                 obj.Add(null);      // No recipients - set to null
             }
-#else
-            obj = CBORObject.NewMap();
-
-            CBORObject cborProtected = CBORObject.Null;
-            if ((objProtected != null) && (objProtected.Count > 0)) {
-                byte[] rgb = objProtected.EncodeToBytes();
-                obj.Add(RecordKeys.Protected,  rgb);
-                cborProtected = CBORObject.FromObject(rgb);
-            }
-
-            if ((objUnprotected != null) && (objUnprotected.Count > 0))  obj.Add(RecordKeys.Unprotected, objUnprotected); // Add unprotected attributes
-
-            obj.Add(RecordKeys.Payload, rgbContent);
-
-            if (signerList.Count > 0) {
-                CBORObject signers = CBORObject.NewArray();
-
-                foreach (Signer key in signerList) {
-                    signers.Add(key.EncodeToCBORObject(cborProtected, rgbContent));
-                }
-                obj.Add(RecordKeys.Signatures, signers);
-            }
-#endif
             return obj;
         }
 
@@ -145,6 +165,17 @@ namespace COSE
         public void SetContent(string contentString)
         {
             rgbContent = UTF8Encoding.ASCII.GetBytes(contentString);
+        }
+
+        public bool Validate(Signer signer)
+        {
+            foreach (Signer x in signerList) {
+                if (x == signer) {
+                    return signer.Validate(rgbContent, rgbProtected);
+                }
+            }
+
+            throw new Exception("Signer is not for this message");
         }
 
     }
@@ -185,6 +216,44 @@ namespace COSE
             keyToSign = key;
         }
 
+        public Signer()
+        {
+
+        }
+
+        public void SetKey(Key key)
+        {
+            keyToSign = key;
+        }
+
+        public void DecodeFromCBORObject(CBORObject obj)
+        {
+            if (obj.Type != CBORType.Array) throw new CoseException("Invalid Signer structure");
+
+            if (obj.Count != 3) throw new CoseException("Invalid Signer structure");
+
+            if (obj[0].Type == CBORType.ByteString) {
+                if (obj[0].GetByteString().Length == 0) {
+                    objProtected = CBORObject.NewMap();
+                    rgbProtected = new byte[0];
+                }
+                else {
+                    rgbProtected = obj[0].GetByteString();
+                    objProtected = CBORObject.DecodeFromBytes(rgbProtected);
+                    if (objProtected.Count == 0) rgbProtected = new byte[0];
+                }
+            }
+            else throw new CoseException("Invalid Signer structure");
+
+            if (obj[1].Type == CBORType.Map) {
+                objUnprotected = obj[1];
+            }
+            else throw new CoseException("Invalid Signer structure");
+
+            if (obj[2].Type == CBORType.ByteString) rgbSignature = obj[2].GetByteString();
+            else throw new CoseException("Invalid Signer structure");
+        }
+
         public CBORObject EncodeToCBORObject()
         {
             if (rgbSignature == null) {
@@ -193,9 +262,8 @@ namespace COSE
             return EncodeToCBORObject(null, null);
         }
 
-        public CBORObject EncodeToCBORObject(CBORObject bodyAttributes, byte[] body)
+        public CBORObject EncodeToCBORObject(byte[] bodyAttributes, byte[] body)
         {
-#if USE_ARRAY
             CBORObject obj = CBORObject.NewArray();
 
             CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
@@ -209,40 +277,31 @@ namespace COSE
             else obj.Add(objUnprotected); // Add unprotected attributes
 
             if (rgbSignature == null) {
-                CBORObject signObj = CBORObject.NewArray();
-                signObj.Add(context);
-                signObj.Add(bodyAttributes);
-                signObj.Add(cborProtected);
-                signObj.Add(externalData);
-                signObj.Add(body);
-
-#if FOR_EXAMPLES
-                m_toBeSigned = signObj.EncodeToBytes();
-#endif
-
-                rgbSignature = Sign(signObj.EncodeToBytes());
+                rgbSignature = Sign(toBeSigned(body, bodyAttributes));
             }
             obj.Add(rgbSignature);
-#else
-            CBORObject obj = CBORObject.NewMap();
+            return obj;
+        }
 
+        private byte[] toBeSigned(byte[] rgbContent, byte[] bodyAttributes)
+        {
             CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
             if ((objProtected != null) && (objProtected.Count > 0)) {
                 byte[] rgb = objProtected.EncodeToBytes();
-                obj.Add(RecordKeys.Protected, rgb);
                 cborProtected = CBORObject.FromObject(rgb);
             }
-            if ((objUnprotected != null) && (objUnprotected.Count > 0)) obj.Add(RecordKeys.Unprotected, objUnprotected); // Add unprotected attributes
 
             CBORObject signObj = CBORObject.NewArray();
+            signObj.Add(context);
             signObj.Add(bodyAttributes);
             signObj.Add(cborProtected);
-            signObj.Add(new byte[0]); // External AAD
-            signObj.Add(body);
+            signObj.Add(externalData);
+            signObj.Add(rgbContent);
 
-            obj.Add(RecordKeys.Signature, Sign(signObj.EncodeToBytes()));
+#if FOR_EXAMPLES
+            m_toBeSigned = signObj.EncodeToBytes();
 #endif
-            return obj;
+            return signObj.EncodeToBytes();
         }
 
         private byte[] Sign(byte[] bytesToBeSigned)
@@ -407,8 +466,117 @@ namespace COSE
                 }
             }
             else throw new CoseException("Algorithm incorrectly encoded");
+        }
 
-            return null;
+        public bool Validate(byte[] content, byte[] msgAttributes)
+        {
+            CBORObject alg = null; // Get the set algorithm or infer one
+
+            byte[] bytesToBeSigned = toBeSigned(content, msgAttributes);
+
+            alg = FindAttribute(HeaderKeys.Algorithm);
+
+            if (alg == null) {
+                throw new Exception("No Signature algorithm known");
+            }
+
+            IDigest digest;
+            IDigest digest2;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "PS384":
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
+                    break;
+
+                default:
+                    throw new Exception("Unknown signature algorithm");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.RSA_PSS_256:
+                    digest = new Sha256Digest();
+                    digest2 = new Sha256Digest();
+                    break;
+
+                case AlgorithmValuesInt.ECDSA_384:
+                case AlgorithmValuesInt.RSA_PSS_384:
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
+                    break;
+
+                case AlgorithmValuesInt.ECDSA_512:
+                case AlgorithmValuesInt.RSA_PSS_512:
+                    digest = new Sha512Digest();
+                    digest2 = new Sha512Digest();
+                    break;
+
+                default:
+                    throw new CoseException("Unknown signature algorith");
+                }
+            }
+            else throw new CoseException("Algorthm incorrectly encoded");
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "PS384": {
+                        PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
+
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_d), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_p), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_q), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dP), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dQ), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_qInv));
+                        ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
+
+                        signer.Init(true, param);
+                        signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        return signer.VerifySignature(rgbSignature);
+
+                    }
+
+                default:
+                    throw new CoseException("Unknown Algorithm");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.RSA_PSS_256:
+                case AlgorithmValuesInt.RSA_PSS_512: {
+                        PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
+
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_d), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_p), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_q), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dP), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dQ), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_qInv));
+                        ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
+
+                        signer.Init(true, param);
+                        signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        return signer.VerifySignature(rgbSignature);
+                    }
+
+                case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.ECDSA_384:
+                case AlgorithmValuesInt.ECDSA_512: {
+                        digest.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        byte[] digestedMessage = new byte[digest.GetDigestSize()];
+                        digest.DoFinal(digestedMessage, 0);
+
+                        X9ECParameters p = keyToSign.GetCurve();
+                        ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                        ECPoint point = keyToSign.GetPoint();
+                        ECPublicKeyParameters param = new ECPublicKeyParameters(point, parameters);
+
+                        ECDsaSigner ecdsa = new ECDsaSigner();
+                        ecdsa.Init(false, param);
+
+                        BigInteger r = new BigInteger(1, rgbSignature, 0, rgbSignature.Length/2);
+                        BigInteger s = new BigInteger(1, rgbSignature, rgbSignature.Length/2, rgbSignature.Length/2);
+                        return ecdsa.VerifySignature(digestedMessage, r, s);
+                    }
+
+                default:
+                    throw new CoseException("Unknown Algorithm");
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
         }
 
         private Org.BouncyCastle.Math.BigInteger ConvertBigNum(PeterO.Cbor.CBORObject cbor)
@@ -466,12 +634,10 @@ namespace COSE
             }
             else if (m_signerToSign != null) {
                CBORObject obj = m_signerToSign.EncodeToCBORObject();
-
-
             }
 
 
-            return base.EncodeToCBORObject(cborBodyAttributes, rgbBody);
+            return base.EncodeToCBORObject(cborBodyAttributes.GetByteString(), rgbBody);
         }
     }
 }

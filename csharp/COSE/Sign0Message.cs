@@ -57,6 +57,31 @@ namespace COSE
             return obj;
         }
 
+        virtual public void DecodeFromCBORObject(CBORObject messageObject)
+        {
+            if (messageObject.Count != 4) throw new CoseException("Invalid Sign1 structure");
+
+            if (messageObject[0].Type == CBORType.ByteString) {
+                if (messageObject[0].GetByteString().Length == 0) objProtected = CBORObject.NewMap();
+                else {
+                    rgbProtected = messageObject[0].GetByteString();
+                    objProtected = CBORObject.DecodeFromBytes(rgbProtected);
+                    if (objProtected.Count == 0) rgbProtected = new byte[0];
+                }
+            }
+            else throw new CoseException("Invalid Sign1 structure");
+
+            if (messageObject[1].Type == CBORType.Map) {
+                objUnprotected = messageObject[1];
+            }
+            else throw new CoseException("Invalid Sign1 structure");
+
+            if (messageObject[2].Type == CBORType.ByteString) rgbContent = messageObject[2].GetByteString();
+            else if (!messageObject[2].IsNull) throw new CoseException("Invalid Sign1 structure");
+
+            if (messageObject[3].Type == CBORType.ByteString) rgbSignature = messageObject[3].GetByteString();
+            else throw new CoseException("Invalid Sign1 structure");
+        }
 
         public override CBORObject Encode()
         {
@@ -140,12 +165,33 @@ namespace COSE
                 signObj.Add(externalData); // External AAD
                 signObj.Add(rgbContent);
 
-                rgbSignature = Sign(signObj.EncodeToBytes());
+                rgbSignature = Sign(toBeSigned());
 
 #if FOR_EXAMPLES
                 m_toBeSigned = signObj.EncodeToBytes();
 #endif
             }
+        }
+
+        private byte[] toBeSigned()
+        {
+            CBORObject cborProtected = CBORObject.FromObject(new byte[0]);
+            if ((objProtected != null) && (objProtected.Count > 0)) {
+                byte[] rgb = objProtected.EncodeToBytes();
+                cborProtected = CBORObject.FromObject(rgb);
+            }
+
+            CBORObject signObj = CBORObject.NewArray();
+            signObj.Add(context);
+            signObj.Add(cborProtected);
+            signObj.Add(externalData); // External AAD
+            signObj.Add(rgbContent);
+
+#if FOR_EXAMPLES
+            m_toBeSigned = signObj.EncodeToBytes();
+#endif
+
+            return signObj.EncodeToBytes();
         }
 
         private byte[] Sign(byte[] bytesToBeSigned)
@@ -310,8 +356,117 @@ namespace COSE
                 }
             }
             else throw new CoseException("Algorithm incorrectly encoded");
+        }
 
-            return null;
+        public bool Validate(Key signerKey)
+        {
+            CBORObject alg = null; // Get the set algorithm or infer one
+
+            byte[] bytesToBeSigned = toBeSigned();
+
+            alg = FindAttribute(HeaderKeys.Algorithm);
+
+            if (alg == null) {
+                throw new CoseException("No algorithm specified");
+            }
+
+            IDigest digest;
+            IDigest digest2;
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "ES384":
+                case "PS384":
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
+                    break;
+
+                default:
+                    throw new Exception("Unknown signature algorithm");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.RSA_PSS_256:
+                    digest = new Sha256Digest();
+                    digest2 = new Sha256Digest();
+                    break;
+
+                case AlgorithmValuesInt.ECDSA_384:
+                    digest = new Sha384Digest();
+                    digest2 = new Sha384Digest();
+                    break;
+
+                case AlgorithmValuesInt.ECDSA_512:
+                case AlgorithmValuesInt.RSA_PSS_512:
+                    digest = new Sha512Digest();
+                    digest2 = new Sha512Digest();
+                    break;
+
+                default:
+                    throw new CoseException("Unknown signature algorith");
+                }
+            }
+            else throw new CoseException("Algorthm incorrectly encoded");
+
+            if (alg.Type == CBORType.TextString) {
+                switch (alg.AsString()) {
+                case "PS384": {
+                        PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
+
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_d), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_p), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_q), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dP), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dQ), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_qInv));
+                        ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
+
+                        signer.Init(true, param);
+                        signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        return signer.VerifySignature(rgbSignature);
+                    }
+
+                default:
+                    throw new CoseException("Unknown Algorithm");
+                }
+            }
+            else if (alg.Type == CBORType.Number) {
+                switch ((AlgorithmValuesInt) alg.AsInt32()) {
+                case AlgorithmValuesInt.RSA_PSS_256:
+                case AlgorithmValuesInt.RSA_PSS_512: {
+                        PssSigner signer = new PssSigner(new RsaEngine(), digest, digest2, digest.GetByteLength());
+
+                        RsaKeyParameters prv = new RsaPrivateCrtKeyParameters(keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_n), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_e), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_d), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_p), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_q), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dP), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_dQ), keyToSign.AsBigInteger(CoseKeyParameterKeys.RSA_qInv));
+                        ParametersWithRandom param = new ParametersWithRandom(prv, Message.GetPRNG());
+
+                        signer.Init(false, param);
+                        signer.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        return signer.VerifySignature(rgbSignature);
+                    }
+
+                case AlgorithmValuesInt.ECDSA_256:
+                case AlgorithmValuesInt.ECDSA_384:
+                case AlgorithmValuesInt.ECDSA_512: {
+
+                        digest.BlockUpdate(bytesToBeSigned, 0, bytesToBeSigned.Length);
+                        byte[] digestedMessage = new byte[digest.GetDigestSize()];
+                        digest.DoFinal(digestedMessage, 0);
+
+                        X9ECParameters p = signerKey.GetCurve();
+                        ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                        ECPoint point = signerKey.GetPoint();
+                        ECPublicKeyParameters param = new ECPublicKeyParameters(point, parameters);
+
+                        ECDsaSigner ecdsa = new ECDsaSigner();
+                        ecdsa.Init(false, param);
+
+                        BigInteger r = new BigInteger(1, rgbSignature, 0, rgbSignature.Length / 2);
+                        BigInteger s = new BigInteger(1, rgbSignature, rgbSignature.Length / 2, rgbSignature.Length / 2);
+                        return ecdsa.VerifySignature(digestedMessage, r, s);
+                    }
+
+                default:
+                    throw new CoseException("Unknown Algorithm");
+                }
+            }
+            else throw new CoseException("Algorithm incorrectly encoded");
         }
 
         private Org.BouncyCastle.Math.BigInteger ConvertBigNum(PeterO.Cbor.CBORObject cbor)

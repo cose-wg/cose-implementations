@@ -25,7 +25,9 @@ namespace examples
         static void Main(string[] args)
         {
             COSE.Key.NewKey();
+            COSE.ChaCha20Poly1305.SelfTest();
 
+            COSE.Recipient.FUseCompressed = true;
             RunTestsInDirectory("spec-examples");
             {
                 byte[] result = allkeys.EncodeToBytes();
@@ -42,6 +44,8 @@ namespace examples
                 bw.Close();
 
             }
+
+            COSE.Recipient.FUseCompressed = false;
 
             RunTestsInDirectory("hmac-examples");
             RunTestsInDirectory("cbc-mac-examples");
@@ -69,7 +73,7 @@ namespace examples
             foreach (var di in diTop.EnumerateDirectories()) {
                 if ((!di.Attributes.HasFlag(FileAttributes.Hidden)) &&
                     (di.FullName.Substring(di.FullName.Length - 4) != "\\new")) {
-                    RunTestsInDirectory(strDirectory +  "\\" + di.Name);
+                    RunTestsInDirectory(strDirectory + "\\" + di.Name);
                 }
             }
 
@@ -111,10 +115,7 @@ namespace examples
             StaticPrng prng = new StaticPrng();
 
             if (control.ContainsKey("title")) {
-                Console.WriteLine("Processing: " + control["title"].AsString());
-            }
-            if (control.ContainsKey("description")) {
-                Console.WriteLine("Description: " + control["description"].AsString());
+                Console.Write("Processing: " + control["title"].AsString());
             }
 
             if (control["input"].ContainsKey("rng_stream")) {
@@ -302,6 +303,47 @@ namespace examples
             return msgOut;
         }
 
+        static bool ValidateSign0(CBORObject cnControl)
+        {
+            CBORObject cnInput = cnControl["input"];
+            CBORObject cnSign;
+            COSE.Sign0Message hSig;
+            int type;
+            bool fFail;
+
+            byte[] rgb = FromHex(cnControl["output"]["cbor"].AsString());
+
+            fFail = HasFailMarker(cnControl);
+
+                cnSign = cnInput["sign0"];
+
+            try {
+                COSE.Message msg = COSE.Message.DecodeFromBytes(rgb, COSE.Tags.Signed0);
+                hSig = (COSE.Sign0Message) msg;
+            }
+            catch (COSE.CoseException e) {
+                return false;
+            }
+
+            SetRecievingAttributes(hSig, cnSign);
+
+            COSE.Key cnkey = GetKey(cnSign["key"], true);
+
+            bool fFailInput = HasFailMarker(cnInput);
+
+            try {
+                bool f = hSig.Validate(cnkey);
+                if (f && (fFail || fFailInput)) return false;
+                if (!f && !(fFail || fFailInput)) return false;
+            }
+            catch (Exception e) {
+                return false;
+            }
+            
+            return true;
+        }
+
+
         static CBORObject ProcessEncrypted(CBORObject control, ref bool fDirty)
         {
             CBORObject input = control["input"];
@@ -349,6 +391,51 @@ namespace examples
                 msgOut = ProcessFailures(msgOut, input["failures"], 2);
             }
             return msgOut;
+        }
+
+        static bool ValidateEncrypted(CBORObject control)
+        {
+            CBORObject cnInput = control["input"];
+            Boolean fFail = false;
+            Boolean fFailBody = false;
+
+            CBORObject cnFail = control["fail"];
+            if ((cnFail != null) && (cnFail.Type == CBORType.Boolean) &&
+                  cnFail.AsBoolean()) {
+                fFailBody = true;
+            }
+
+            byte[] rgbData = FromHex(control["output"]["cbor"].AsString());
+
+            try {
+                COSE.Message msg = COSE.Message.DecodeFromBytes(rgbData, COSE.Tags.Encrypted);
+                COSE.EncryptMessage enc0 = (COSE.EncryptMessage) msg;
+
+                CBORObject cnEncrypt = cnInput["encrypted"];
+                SetRecievingAttributes(msg, cnEncrypt);
+
+                CBORObject cnRecipients = cnEncrypt["recipients"];
+                cnRecipients = cnRecipients[0];
+
+                COSE.Key cnKey = GetKey(cnRecipients["key"], true);
+
+                CBORObject kk = cnKey[CBORObject.FromObject(-1)];
+
+                cnFail = cnRecipients["fail"];
+
+                try {
+                    byte[] rgbContent = enc0.Decrypt(kk.GetByteString());
+                    if ((cnFail != null) && !cnFail.AsBoolean()) return false; 
+                }
+                catch (Exception e) {
+                    if (!fFailBody && ((cnFail == null) || !cnFail.AsBoolean())) return false;
+                }
+            }
+            catch (Exception e) {
+                if (!fFailBody) return false;
+            }
+
+            return true;
         }
 
         static CBORObject ProcessEnveloped(CBORObject control, ref bool fDirty)
@@ -542,8 +629,56 @@ namespace examples
             return msgOut;
         }
 
-    static CBORObject ProcessFailures(CBORObject msgOut, CBORObject failures, int iTag)
-    {
+        static public Boolean ValidateMac0(CBORObject control)
+        {
+            CBORObject cnInput = control["input"];
+            int type;
+            Boolean fFail = false;
+            Boolean fFailBody = false;
+            byte[] rgbData = FromHex(control["output"]["cbor"].AsString());
+
+
+            try {
+                CBORObject pFail = control["fail"];
+                if ((pFail != null) && (pFail.Type == CBORType.Boolean) &&
+                      pFail.AsBoolean()) {
+                    fFailBody = true;
+                }
+
+                COSE.Message msg = COSE.Message.DecodeFromBytes(rgbData, COSE.Tags.MAC0);
+                COSE.MAC0Message mac0 = (COSE.MAC0Message) msg;
+
+                CBORObject cnMac = cnInput["mac0"];
+                SetRecievingAttributes(msg, cnMac);
+
+                CBORObject cnRecipients = cnMac["recipients"];
+                cnRecipients = cnRecipients[0];
+
+                COSE.Key cnKey = GetKey(cnRecipients["key"], true);
+
+                CBORObject kk = cnKey[CBORObject.FromObject(-1)];
+
+                pFail = cnRecipients["fail"];
+
+                Boolean f = mac0.Validate(cnKey);
+
+                if (f) {
+                    if ((pFail != null) && pFail.AsBoolean()) return false;
+                }
+                else {
+                    if ((pFail != null) && !pFail.AsBoolean()) return false;
+                }
+
+            }
+            catch (Exception e) {
+                if (!fFailBody) return false;
+            }
+
+            return true;
+        }
+
+        static CBORObject ProcessFailures(CBORObject msgOut, CBORObject failures, int iTag)
+        {
             foreach (CBORObject failure in failures.Keys) {
                 switch (failure.AsString()) {
                 case "ChangeTag": // Alter the validate tag
@@ -590,7 +725,7 @@ namespace examples
                     throw new Exception("Unknown failure string " + failure.AsString());
                 }
             }
-                return msgOut;
+            return msgOut;
         }
 
         static CBORObject GetAttribute(CBORObject obj, string attrName)
@@ -714,6 +849,11 @@ namespace examples
             msg.SetExternalData(FromHex(externData.AsString()));
         }
 
+        static void AddExternalData(COSE.Recipient msg, CBORObject externData)
+        {
+            msg.SetExternalData(FromHex(externData.AsString()));
+        }
+
         static void AddCounterSignature(COSE.Message msg, CBORObject items)
         {
             if (items.Type == CBORType.Map) {
@@ -758,7 +898,7 @@ namespace examples
                 COSE.Key myKey = GetKey(control["sender_key"]);
                 recipient.SetSenderKey(myKey);
                 if (myKey.ContainsName(COSE.CoseKeyKeys.KeyIdentifier)) {
-                    recipient.AddAttribute(COSE.HeaderKeys.StaticKey_ID, CBORObject.FromObject( myKey.AsBytes(COSE.CoseKeyKeys.KeyIdentifier)), false);
+                    recipient.AddAttribute(COSE.HeaderKeys.StaticKey_ID, CBORObject.FromObject(myKey.AsBytes(COSE.CoseKeyKeys.KeyIdentifier)), false);
                 }
                 else {
                     recipient.AddAttribute(COSE.HeaderKeys.StaticKey, myKey.PublicKey().AsCBOR(), false);
@@ -836,7 +976,7 @@ namespace examples
             return signer;
         }
 
-        static COSE.Key GetKey(CBORObject control)
+        static COSE.Key GetKey(CBORObject control, bool fPublicKey = false)
         {
             COSE.Key key = new COSE.Key();
             CBORObject newKey;
@@ -928,9 +1068,11 @@ namespace examples
                 case "n": newKey = COSE.CoseKeyParameterKeys.RSA_n; goto BinaryValue;
 
                 case "d":
+                    // if (!fPublicKey) continue;
                     if (type == "RSA") newKey = COSE.CoseKeyParameterKeys.RSA_d;
                     else newKey = COSE.CoseKeyParameterKeys.EC_D;
                     goto BinaryValue;
+
                 case "k": newKey = COSE.CoseKeyParameterKeys.Octet_k; goto BinaryValue;
                 case "p": newKey = COSE.CoseKeyParameterKeys.RSA_p; goto BinaryValue;
                 case "q": newKey = COSE.CoseKeyParameterKeys.RSA_q; goto BinaryValue;
@@ -1187,22 +1329,16 @@ namespace examples
         {
             bool result = false;
 
-            if (control.ContainsKey("title")) {
-                Console.Write("Validating: " + control["title"].AsString());
-            }
-
             try {
 
                 if (control["input"].ContainsKey("mac")) result = ValidateMAC(control);
                 else if (control["input"].ContainsKey("enveloped")) result = ValidateEnveloped(control);
-
-                /*
-                else if (control["input"].ContainsKey("mac0")) result = ProcessMAC0(control, ref modified);
-                else if (control["input"].ContainsKey("enveloped")) result = ProcessEnveloped(control, ref modified);
-                else if (control["input"].ContainsKey("encrypted")) result = ProcessEncrypted(control, ref modified);
-                else if (control["input"].ContainsKey("sign")) result = ProcessSign(control, ref modified);
-                else if (control["input"].ContainsKey("sign0")) result = ProcessSign0(control, ref modified);
+                else if (control["input"].ContainsKey("mac0")) result = ValidateMac0(control);
+                else if (control["input"].ContainsKey("encrypted")) result = ValidateEncrypted(control);
+                else if (control["input"].ContainsKey("sign")) result = ValidateSigned(control);
+                else if (control["input"].ContainsKey("sign0")) result = ValidateSign0(control);
                 else throw new Exception("Unknown operation in control");
+                /*
 
                 byte[] rgbNew = result.EncodeToBytes();
                 if (control["output"].ContainsKey("cbor")) {
@@ -1288,6 +1424,12 @@ namespace examples
 
                 recipX = SetRecievingAttributes(recipX, recip);
 
+                if (recip["sender_key"] != null) {
+                    if (recipX.FindAttribute(COSE.HeaderKeys.StaticKey) == null) {
+                        recipX.AddDontSend(COSE.HeaderKeys.StaticKey, GetKey(recip["sender_key"], true).AsCBOR());
+                    }
+                }
+
                 try {
                     msg.Decrypt(recipX);
                 }
@@ -1311,21 +1453,117 @@ namespace examples
 
             for (int iRecipient = 0; iRecipient < mac["recipients"].Count; iRecipient++) {
                 CBORObject recip = mac["recipients"][iRecipient];
+                COSE.MACMessage msg;
+                try {
+                    COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb);
+                    msg = (COSE.MACMessage) msgX;
+                }
+                catch (COSE.CoseException e) {
+                    // Check for expected decode failure
+                    return false;
+                }
 
-                COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb);
-                COSE.MACMessage msg = (COSE.MACMessage) msgX;
+                SetRecievingAttributes(msg, mac);
 
                 COSE.Recipient recipX = msg.RecipientList[iRecipient];
+                COSE.Key key = GetKey(recip["key"], false);
+                recipX.SetKey(key);
 
                 recipX = SetRecievingAttributes(recipX, recip);
 
-                f &= msg.Validate(recipX);
-        
+                CBORObject cnStatic = recip["sender_key"];
+                if (cnStatic != null) {
+                    if (recipX.FindAttribute(COSE.HeaderKeys.StaticKey) == null) {
+                        recipX.AddDontSend(COSE.HeaderKeys.StaticKey, GetKey(cnStatic, true).AsCBOR());
+                    }
+                }
+
+                try {
+                    f = msg.Validate(recipX);
+                    if (!f) return false;
+                }
+                catch (Exception e) {
+                    return false;
+                }
 
             }
 
-            return f;
+            return true;
 
+        }
+
+        static bool ValidateSigned(CBORObject cnControl)
+        {
+            CBORObject cnInput = cnControl["input"];
+            CBORObject cnMessage;
+            CBORObject cnSigners;
+            bool fFailBody = false;
+
+            fFailBody = HasFailMarker(cnControl);
+
+            try {
+                cnMessage = cnInput["sign"];
+                cnSigners = cnMessage["signers"];
+                byte[] rgb = FromHex(cnControl["output"]["cbor"].AsString());
+                int i = 0;
+                foreach (CBORObject cnSigner in cnSigners.Values) {
+                    COSE.SignMessage signMsg = null;
+
+                    try {
+                        COSE.Message msg = COSE.Message.DecodeFromBytes(rgb, COSE.Tags.Signed);
+                        signMsg = (COSE.SignMessage) msg;
+                    }
+                    catch (Exception e) {
+                        if (fFailBody) return true;
+                        throw e;
+                    }
+
+                    SetRecievingAttributes(signMsg, cnMessage);
+
+                    COSE.Key cnKey = GetKey(cnSigner["key"]);
+                    COSE.Signer hSigner = signMsg.SignerList[i];
+
+                    SetRecievingAttributes(hSigner, cnSigner);
+
+                    hSigner.SetKey(cnKey);
+
+                    Boolean fFailSigner = HasFailMarker(cnSigner);
+
+                    try {
+                        Boolean f = signMsg.Validate(hSigner);
+                        if (!f && !(fFailBody || fFailSigner)) return false;
+                    }
+                    catch (Exception e) {
+                        if (!fFailBody && !fFailSigner) return false;
+                    }
+
+                    CBORObject cnCounter;
+                    if (i == 0) {
+                        cnCounter = cnMessage["countersign"];
+                        if (cnCounter != null) {
+                            CheckCounterSignatures(signMsg, cnMessage);
+                        }
+                    }
+#if false
+                    cnCounter = cnSigner["countersign"];
+                    if (cnCounter != null) {
+                        CheckCounterSignatures(hSigner, cnSigner);
+                    }
+#endif
+                    i++;
+                }
+            }
+            catch (Exception e) {
+                return false;
+            }
+            return true;
+        }
+
+        static public Boolean HasFailMarker(CBORObject cn)
+        {
+            CBORObject cnFail = cn["fail"];
+            if (cnFail != null && cnFail.AsBoolean()) return true;
+            return false;
         }
 
         static COSE.Recipient SetRecievingAttributes(COSE.Recipient recip, CBORObject control)
@@ -1343,6 +1581,54 @@ namespace examples
             return recip;
         }
 
+        static void SetRecievingAttributes(COSE.Message recip, CBORObject control)
+        {
+            if (control.ContainsKey("unsent")) AddAttributes(recip, control["unsent"], 2);
+
+            if (control.ContainsKey("external")) AddExternalData(recip, control["external"]);
+        }
+
+        static void SetRecievingAttributes(COSE.Signer recip, CBORObject control)
+        {
+            if (control.ContainsKey("unsent")) AddAttributes(recip, control["unsent"], 2);
+
+#if false
+            if (control.ContainsKey("external")) AddExternalData(recip, control["external"]);
+#endif
+        }
+
+        static void CheckCounterSignatures(COSE.Message msg, CBORObject cSigInfo)
+        {
+            CBORObject cSigs = msg.FindAttribute(COSE.HeaderKeys.CounterSignature);
+
+            if (cSigs == null) throw new Exception("No counter signature found");
+
+            if (cSigs.Type != CBORType.Array) throw new Exception("Incorrect counter sign object");
+
+            CBORObject cSigConfig = cSigInfo["signers"];
+
+#if false
+            int iCSign;
+            for (iCSign = 0; iCSign < cSigConfig.Count; iCSign++) {
+                COSE.CounterSignature sig;
+                if (cSigs[0].Type != CBORType.Array) {
+                    sig = new COSE.CounterSignature();
+                    sig.DecodeFromCBORObject(cSigs);
+                }
+                else {
+                    sig = new CounterSignature();
+                    sig.DecodeFromCBORObject(cSigs[iCSign]);
+                }
+
+                CBORObject cnKey = BuildKey(cSigConfig[iCSign]["key"], false);
+                SetReceivingAttributes(sig, cSigConfig[iCSign]);
+
+                sig.setKey(cnKey);
+
+                Boolean f = sig.Validate(msg);
+            }
+#endif
+        }
     }
 
     class BadOutputException : Exception

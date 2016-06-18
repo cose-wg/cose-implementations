@@ -119,10 +119,15 @@ namespace COSE
             else throw new CoseException("Algorithm incorrectly encoded");
         }
 
-        public bool Validate(Recipient recipientReceiver)
+        public bool Validate(Key recipientReceiver)
         {
             byte[] rgbKey = null;
             int cbitKey;
+
+            if (recipientReceiver[CoseKeyKeys.KeyType].AsInt32() != (int) GeneralValuesInt.KeyType_Octet) {
+                throw new CoseException("Key type not octet");
+            }
+            rgbKey = recipientReceiver[CoseKeyParameterKeys.Octet_k].GetByteString();
 
             CBORObject alg = FindAttribute(COSE.HeaderKeys.Algorithm);
             if (alg.Type == CBORType.TextString) {
@@ -535,7 +540,7 @@ namespace COSE
 
             bool fReturn = true;
             for (int i = 0; i < rgbCheck.Length; i++) {
-                fReturn &= (rgbTag[i] != rgbCheck[i]);
+                fReturn &= (rgbTag[i] == rgbCheck[i]);
             }
             return fReturn;
         }

@@ -14,6 +14,8 @@ using Org.BouncyCastle.Crypto.Agreement;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 
+using Org.BouncyCastle.Math.EC;
+
 namespace COSE
 {
     public class Key
@@ -172,6 +174,26 @@ namespace COSE
                 }
             }
             else throw new CoseException("Incorrectly encoded key type");
+        }
+
+        public ECPoint GetPoint()
+        {
+            X9ECParameters p = this.GetCurve();
+            CBORObject y = this.AsCBOR()[CoseKeyParameterKeys.EC_Y];
+            Org.BouncyCastle.Math.EC.ECPoint pubPoint;
+
+            if (y.Type == CBORType.Boolean) {
+                byte[] X = this.AsBytes(CoseKeyParameterKeys.EC_X);
+                byte[] rgb = new byte[X.Length + 1];
+                Array.Copy(X, 0, rgb, 1, X.Length);
+                rgb[0] = (byte) (2 + (y.AsBoolean() ? 1 : 0));
+                pubPoint = p.Curve.DecodePoint(rgb);
+            }
+            else {
+                pubPoint = p.Curve.CreatePoint(this.AsBigInteger(CoseKeyParameterKeys.EC_X), this.AsBigInteger(CoseKeyParameterKeys.EC_Y));
+            }
+
+            return pubPoint;
         }
 
         public Key PublicKey()
