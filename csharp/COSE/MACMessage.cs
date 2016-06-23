@@ -31,8 +31,14 @@ namespace COSE
 
             //  Protected values.
             if (obj[0].Type == CBORType.ByteString) {
-                objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
-                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+                byte[] data = obj[0].GetByteString();
+                if (data.Length == 0) {
+                    objProtected = CBORObject.NewMap();
+                }
+                else {
+                    objProtected = CBORObject.DecodeFromBytes(data);
+                    if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+                }
             }
             else {
                 throw new CoseException("Invalid MAC structure");
@@ -209,7 +215,7 @@ namespace COSE
 
             bool fReturn = true;
             for (int i = 0; i < rgbCheck.Length; i++) {
-                fReturn &= (rgbTag[i] != rgbCheck[i]);
+                fReturn &= (rgbTag[i] == rgbCheck[i]);
             }
             return fReturn;
         }
@@ -240,8 +246,12 @@ namespace COSE
 
             //  Protected values.
             if (obj[0].Type == CBORType.ByteString) {
-                objProtected = CBORObject.DecodeFromBytes(obj[0].GetByteString());
-                if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+                byte[] data = obj[0].GetByteString();
+                if (data.Length > 0) {
+                    objProtected = CBORObject.DecodeFromBytes(data);
+                    if (objProtected.Type != CBORType.Map) throw new CoseException("Invalid MAC Structure");
+                }
+                else objProtected = CBORObject.NewMap();
             }
             else {
                 throw new CoseException("Invalid MAC structure");

@@ -853,6 +853,11 @@ namespace COSE
                     if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
                     return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha512Digest());
 
+                case AlgorithmValuesInt.Direct_HKDF_AES_128:
+                case AlgorithmValuesInt.Direct_HKDF_AES_256:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF_AES(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK);
+
                 case AlgorithmValuesInt.RSA_OAEP: return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
                 case AlgorithmValuesInt.RSA_OAEP_256: return RSA_OAEP_KeyUnwrap(key, new Sha256Digest());
 

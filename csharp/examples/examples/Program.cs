@@ -322,6 +322,7 @@ namespace examples
                 hSig = (COSE.Sign0Message) msg;
             }
             catch (COSE.CoseException e) {
+                if (fFail) return true;
                 return false;
             }
 
@@ -337,6 +338,7 @@ namespace examples
                 if (!f && !(fFail || fFailInput)) return false;
             }
             catch (Exception e) {
+                if (fFail || fFailInput) return true;
                 return false;
             }
             
@@ -639,11 +641,7 @@ namespace examples
 
 
             try {
-                CBORObject pFail = control["fail"];
-                if ((pFail != null) && (pFail.Type == CBORType.Boolean) &&
-                      pFail.AsBoolean()) {
-                    fFailBody = true;
-                }
+                fFailBody = HasFailMarker(control);
 
                 COSE.Message msg = COSE.Message.DecodeFromBytes(rgbData, COSE.Tags.MAC0);
                 COSE.MAC0Message mac0 = (COSE.MAC0Message) msg;
@@ -658,15 +656,16 @@ namespace examples
 
                 CBORObject kk = cnKey[CBORObject.FromObject(-1)];
 
-                pFail = cnRecipients["fail"];
+                fFail = HasFailMarker(cnRecipients);
+
 
                 Boolean f = mac0.Validate(cnKey);
 
                 if (f) {
-                    if ((pFail != null) && pFail.AsBoolean()) return false;
+                    if (fFail || fFailBody) return false;
                 }
                 else {
-                    if ((pFail != null) && !pFail.AsBoolean()) return false;
+                    if (!fFail && !fFailBody) return false;
                 }
 
             }
@@ -850,6 +849,11 @@ namespace examples
         }
 
         static void AddExternalData(COSE.Recipient msg, CBORObject externData)
+        {
+            msg.SetExternalData(FromHex(externData.AsString()));
+        }
+
+        static void AddExternalData(COSE.Signer msg, CBORObject externData)
         {
             msg.SetExternalData(FromHex(externData.AsString()));
         }
@@ -1338,55 +1342,10 @@ namespace examples
                 else if (control["input"].ContainsKey("sign")) result = ValidateSigned(control);
                 else if (control["input"].ContainsKey("sign0")) result = ValidateSign0(control);
                 else throw new Exception("Unknown operation in control");
-                /*
 
-                byte[] rgbNew = result.EncodeToBytes();
-                if (control["output"].ContainsKey("cbor")) {
-                    byte[] rgbSource = FromHex(control["output"]["cbor"].AsString());
-                    if (!rgbSource.SequenceEqual(rgbNew)) {
-                        Console.WriteLine();
-                        Console.WriteLine("******************* New and Old do not match!!!");
-                        Console.WriteLine();
-
-                        control["output"]["cbor"] = CBORObject.FromObject(ToHex(rgbNew));
-                        modified = true;
-                    }
+                if (!result) {
+                    Console.Write(" ");
                 }
-                else {
-                    control["output"].Add("cbor", ToHex(rgbNew));
-                    modified = true;
-                }
-                FileStream bw = File.OpenWrite(fileName);
-                bw.SetLength(0);
-                bw.Write(rgbNew, 0, rgbNew.Length);
-                bw.Close();
-
-                if (control["output"].ContainsKey("cbor_diag")) {
-                    string strSource = control["output"]["cbor_diag"].ToString();
-                    string strThis = result.ToString();
-
-                    if (strSource != strThis) {
-                        control["output"]["cbor_diag"] = CBORObject.FromObject(strThis);
-                        modified = true;
-                    }
-                }
-                else {
-                    control["output"].Add("cbor_diag", result.ToString());
-                    modified = true;
-                }
-
-
-                if (prng.IsDirty) {
-                    if (prng.buffer != null) {
-                        if (control["input"].ContainsKey("rng_stream")) control["input"]["rng_stream"] = prng.buffer;
-                        else control["input"].Add("rng_stream", prng.buffer);
-                    }
-                    else {
-                        if (control["input"].ContainsKey("rng_stream")) control["input"].Remove(CBORObject.FromObject("rng_stream"));
-                    }
-                    modified = true;
-                }
-                */
             }
             catch (COSE.CoseException e) {
                 Console.WriteLine();
@@ -1408,13 +1367,22 @@ namespace examples
             CBORObject input = control["input"];
             CBORObject encrypt = input["enveloped"];
             byte[] rgb = FromHex(control["output"]["cbor"].AsString());
-            bool f = true;
 
             if ((!encrypt.ContainsKey("recipients")) || (encrypt["recipients"].Type != CBORType.Array)) throw new Exception("Missing or malformed recipients");
             for (int iRecipient = 0; iRecipient < encrypt["recipients"].Count; iRecipient++) {
 
-                COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb);
-                COSE.EnvelopedMessage msg = (COSE.EnvelopedMessage) msgX;
+                bool fFail = HasFailMarker(control) || HasFailMarker(encrypt);
+                COSE.EnvelopedMessage msg;
+
+                try {
+
+                    COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb, COSE.Tags.Enveloped);
+                    msg = (COSE.EnvelopedMessage) msgX;
+                }
+                catch(Exception e) {
+                    if (fFail) return true;
+                    return false;
+                }
 
                 if (encrypt.ContainsKey("unsent")) AddAttributes(msg, encrypt["unsent"], 2);
                 if (encrypt.ContainsKey("external")) AddExternalData(msg, encrypt["external"]);
@@ -1430,16 +1398,19 @@ namespace examples
                     }
                 }
 
+                bool fFailRecipient = HasFailMarker(recip);
+
                 try {
                     msg.Decrypt(recipX);
+                    
                 }
-                catch (COSE.CoseException e) {
-                    f = false;
-                    throw e;
+                catch (Exception e) {
+                    if (fFail || fFailRecipient) return true;
+                    return false;
                 }
             }
 
-            return f;
+            return true;
         }
 
         static bool ValidateMAC(CBORObject control)
@@ -1454,14 +1425,20 @@ namespace examples
             for (int iRecipient = 0; iRecipient < mac["recipients"].Count; iRecipient++) {
                 CBORObject recip = mac["recipients"][iRecipient];
                 COSE.MACMessage msg;
+
+                bool fFail = HasFailMarker(mac) || HasFailMarker(control);
+
                 try {
-                    COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb);
+                    COSE.Message msgX = COSE.Message.DecodeFromBytes(rgb, COSE.Tags.MAC);
                     msg = (COSE.MACMessage) msgX;
                 }
                 catch (COSE.CoseException e) {
                     // Check for expected decode failure
+                    if (fFail) return true;
                     return false;
                 }
+
+                bool fFailRecip = HasFailMarker(recip);
 
                 SetRecievingAttributes(msg, mac);
 
@@ -1480,12 +1457,12 @@ namespace examples
 
                 try {
                     f = msg.Validate(recipX);
-                    if (!f) return false;
+                    if (f && (fFail || fFailRecip)) return false;
+                    else if (!f && !(fFail || fFailRecip)) return false;
                 }
                 catch (Exception e) {
-                    return false;
+                    if (!(fFail || fFailRecip)) return false;
                 }
-
             }
 
             return true;
@@ -1592,9 +1569,7 @@ namespace examples
         {
             if (control.ContainsKey("unsent")) AddAttributes(recip, control["unsent"], 2);
 
-#if false
             if (control.ContainsKey("external")) AddExternalData(recip, control["external"]);
-#endif
         }
 
         static void CheckCounterSignatures(COSE.Message msg, CBORObject cSigInfo)
