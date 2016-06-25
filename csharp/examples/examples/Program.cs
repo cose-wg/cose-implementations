@@ -28,6 +28,7 @@ namespace examples
             COSE.ChaCha20Poly1305.SelfTest();
 
             COSE.Recipient.FUseCompressed = true;
+
             RunTestsInDirectory("spec-examples");
             {
                 byte[] result = allkeys.EncodeToBytes();
@@ -51,6 +52,7 @@ namespace examples
             RunTestsInDirectory("cbc-mac-examples");
             RunTestsInDirectory("aes-ccm-examples");
             RunTestsInDirectory("aes-gcm-examples");
+            RunTestsInDirectory("chacha-poly-examples");
             RunTestsInDirectory("ecdsa-examples");
             RunTestsInDirectory("hkdf-hmac-sha-examples");
             RunTestsInDirectory("hkdf-aes-examples");
@@ -1228,7 +1230,7 @@ namespace examples
             case "ECDH-SS-A192KW": return COSE.AlgorithmValues.ECDH_SS_HKDF_256_AES_KW_192;
             case "ECDH-ES-A256KW": return COSE.AlgorithmValues.ECDH_ES_HKDF_256_AES_KW_256;
             case "ECDH-SS-A256KW": return COSE.AlgorithmValues.ECDH_SS_HKDF_256_AES_KW_256;
-
+            case "ChaCha-Poly1305": return COSE.AlgorithmValues.ChaCha20_Poly1305;
             default: return old;
             }
         }
