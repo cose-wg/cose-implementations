@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.Text;
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Generators;
@@ -10,11 +12,166 @@ using Org.BouncyCastle.Utilities;
 
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Macs;
+using Org.BouncyCastle.Math;
 
 namespace COSE
 {
     public class ChaCha20Poly1305 : IAeadBlockCipher
     {
+        /// <summary>
+        /// Poly1305 message authentication code, designed by D. J. Bernstein.
+        /// </summary>
+        /// <remarks>
+        /// Poly1305 computes a 128-bit (16 bytes) authenticator, using a 128 bit nonce and a 256 bit key
+        /// consisting of a 128 bit key applied to an underlying cipher, and a 128 bit key (with 106
+        /// effective key bits) used in the authenticator.
+        /// 
+        /// The polynomial calculation in this implementation is adapted from the public domain <a
+        /// href="https://github.com/floodyberry/poly1305-donna">poly1305-donna-unrolled</a> C implementation
+        /// by Andrew M (@floodyberry).
+        /// </remarks>
+        /// <seealso cref="Org.BouncyCastle.Crypto.Generators.Poly1305KeyGenerator"/>
+        public class Poly1305
+            : IMac
+        {
+            private const int BLOCK_SIZE = 16;
+
+            private readonly byte[] singleByte = new byte[1];
+
+            // Initialised state
+
+            BigInteger r;
+            BigInteger s;
+            BigInteger a;
+            static BigInteger p = new BigInteger(new byte[] { 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfb });
+
+
+            /** Current block of buffered input */
+            private byte[] currentBlock = new byte[BLOCK_SIZE];
+
+            /** Current offset in input buffer */
+            private int currentBlockOffset = 0;
+
+
+            /**
+             * Constructs a Poly1305 MAC, where the key passed to init() will be used directly.
+             */
+            public Poly1305()
+            {
+            }
+
+            /// <summary>
+            /// Initialises the Poly1305 MAC.
+            /// </summary>
+            /// <param name="parameters">a {@link ParametersWithIV} containing a 128 bit nonce and a {@link KeyParameter} with
+            ///          a 256 bit key complying to the {@link Poly1305KeyGenerator Poly1305 key format}.</param>
+            public void Init(ICipherParameters parameters)
+            {
+                byte[] nonce = null;
+
+                if (!(parameters is KeyParameter))
+                    throw new ArgumentException("Poly1305 requires a key.");
+
+                KeyParameter keyParams = (KeyParameter) parameters;
+
+                SetKey(keyParams.GetKey(), nonce);
+
+                Reset();
+            }
+
+            static BigInteger clamp = new BigInteger("0ffffffc0ffffffc0ffffffc0fffffff", 16);
+            private void SetKey(byte[] key, byte[] nonce)
+            {
+                byte[] z = new byte[key.Length];
+                Array.Copy(key, z, key.Length);
+                Array.Reverse(z);
+                // Extract r portion of key
+                r = new BigInteger(1, z, 16, 16);
+                r = r.And(clamp);
+                s = new BigInteger(1, z, 0, 16);
+            }
+
+            public string AlgorithmName
+            {
+                get { return "Poly1305"; }
+            }
+
+            public int GetMacSize()
+            {
+                return BLOCK_SIZE;
+            }
+
+            public void Update(byte input)
+            {
+                singleByte[0] = input;
+                BlockUpdate(singleByte, 0, 1);
+            }
+
+            public void BlockUpdate(byte[] input, int inOff, int len)
+            {
+                int copied = 0;
+                while (len > copied) {
+                    if (currentBlockOffset == BLOCK_SIZE) {
+                        processBlock();
+                        currentBlockOffset = 0;
+                    }
+
+                    int toCopy = System.Math.Min((len - copied), BLOCK_SIZE - currentBlockOffset);
+                    Array.Copy(input, copied + inOff, currentBlock, currentBlockOffset, toCopy);
+                    copied += toCopy;
+                    currentBlockOffset += toCopy;
+                }
+
+            }
+
+            static BigInteger HighBit = new BigInteger(new byte[] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+            private void processBlock()
+            {
+                if (currentBlockOffset < BLOCK_SIZE) {
+                    currentBlock[currentBlockOffset] = 1;
+                    for (int i = currentBlockOffset + 1; i < BLOCK_SIZE; i++) {
+                        currentBlock[i] = 0;
+                    }
+                }
+
+                Array.Reverse(currentBlock);
+                BigInteger n = new BigInteger(1, currentBlock);
+                if (currentBlockOffset == BLOCK_SIZE) {
+                    n = n.Add(HighBit);
+                }
+
+                a = a.Add(n);
+                a = r.Multiply(a);
+                a = a.Mod(p);
+            }
+
+            public int DoFinal(byte[] output, int outOff)
+            {
+                if (outOff + BLOCK_SIZE > output.Length) {
+                    throw new DataLengthException("Output buffer is too short.");
+                }
+
+                if (currentBlockOffset > 0) {
+                    // Process padded block
+                    processBlock();
+                }
+
+                a = a.Add(s);
+
+                byte[] value = a.ToByteArrayUnsigned();
+                Array.Reverse(value);
+                Array.Copy(value, 0, output, outOff, BLOCK_SIZE);
+                Reset();
+                return BLOCK_SIZE;
+            }
+
+            public void Reset()
+            {
+                currentBlockOffset = 0;
+                a = new BigInteger(new byte[1] { 0 });
+            }
+        }
+
         class ChaChaX : ChaChaEngine
         {
             public override void Init(bool forEncryption, ICipherParameters parameters)
@@ -93,7 +250,8 @@ namespace COSE
         private byte[] macResult;
         private int bufOff;
         private int aadLength;
-        private int plainTextLength;
+
+        private readonly MemoryStream data = new MemoryStream();
 
         public ChaCha20Poly1305()
         {
@@ -155,7 +313,6 @@ namespace COSE
             tmpCypher.ProcessBytes(zero, 0, zero.Length, polyKey, 0);
 
             poly = new Poly1305();
-            Poly1305KeyGenerator.Clamp(polyKey);
 
             KeyParameter tmpKey2 = new KeyParameter(polyKey);
             poly.Init(tmpKey2);
@@ -169,12 +326,12 @@ namespace COSE
 
         private void InitCipher()
         {
-            this.plainTextLength = 0;
             this.aadLength = 0;
 
             poly.Reset();
             chacha20.Reset();
             chacha20.AddOne();
+            data.SetLength(0);
 
             if (initialAssociatedText != null) {
                 ProcessAadBytes(initialAssociatedText, 0, initialAssociatedText.Length);
@@ -208,54 +365,37 @@ namespace COSE
 
         public virtual void ProcessAadByte(byte input)
         {
-            if (plainTextLength > 0) throw new InvalidOperationException("All AAD data must be processed before plaintext data");
-
             poly.Update(input);
             aadLength += 1;
         }
 
         public virtual void ProcessAadBytes(byte[] inBytes, int inOff, int len)
         {
-            if (plainTextLength > 0) throw new InvalidOperationException("All AAD data must be processed before plaintext data");
-
             poly.BlockUpdate(inBytes, inOff, len);
             aadLength += len;
         }
 
         public virtual int ProcessByte(byte input, byte[] output, int outOff)
         {
-            byte[] x = new byte[1];
-            return ProcessBytes(x, 0, 1, output, outOff);
+            data.WriteByte(input);
+            return 0;
         }
 
         public virtual int ProcessBytes(byte[] input, int inOff, int len, byte[] output, int outOff)
         {
-            if (input.Length < (inOff + len)) throw new DataLengthException("Input buffer too short");
-
-            if (plainTextLength == 0) {
-                byte[] zeros = new byte[16 - (aadLength % 16)];
-                if (zeros.Length != 16) poly.BlockUpdate(zeros, 0, zeros.Length);
-            }
-            plainTextLength += len;
-
-            chacha20.ProcessBytes(input, inOff, len, output, outOff);
-
-            if (forEncryption) {
-                poly.BlockUpdate(output, outOff, len);
-            }
-            else {
-                poly.BlockUpdate(input, inOff, len);
-            }
-            return len;
+            data.Write(input, inOff, len);
+            return 0;
         }
 
         public int DoFinal(byte[] output, int outOff)
         {
-            if (plainTextLength + aadLength == 0) {
+            byte[] zeros;
+
+            if (data.Length + aadLength == 0) {
                 InitCipher();
             }
 
-            int extra = bufOff;
+            int extra = (int) data.Length;
 
             if (forEncryption) {
                 // Check.OutputLength(output, outOff, bufOff, extra + macSize, "Output buffer too short");
@@ -268,26 +408,44 @@ namespace COSE
                 // Check.OutputLength(output, outOff, extra, "Output buffer too short");
             }
 
+            //  Pad out the AD
+
+                zeros = new byte[16 - (aadLength % 16)];
+                if (zeros.Length != 16) poly.BlockUpdate(zeros, 0, zeros.Length);
+
+            chacha20.ProcessBytes(data.GetBuffer(), 0, extra, output, outOff);
+
+            if (forEncryption) {
+                poly.BlockUpdate(output, outOff, extra);
+            }
+            else {
+                poly.BlockUpdate(data.GetBuffer(), 0, extra);
+            }
+
             int resultLen = 0;
 
-            byte[] zeros = new byte[16 - (plainTextLength % 16)];
+            zeros = new byte[16 - (extra % 16)];
             if (zeros.Length != 16) poly.BlockUpdate(zeros, 0, zeros.Length);
 
             byte[] lengths = BitConverter.GetBytes((Int64) aadLength);
             poly.BlockUpdate(lengths, 0, lengths.Length);
-            lengths = BitConverter.GetBytes((Int64) plainTextLength);
+            lengths = BitConverter.GetBytes((Int64) extra);
             poly.BlockUpdate(lengths, 0, lengths.Length);
 
             macResult = new byte[macSize];
             if (poly.DoFinal(macResult, 0) != macResult.Length) throw new Exception("Internal Error");
 
-
             if (forEncryption) {
-                resultLen = macSize;
-                Array.Copy(macResult, 0, output, outOff, macSize);
+                resultLen = extra + macSize;
+                Array.Copy(macResult, 0, output, extra+outOff, macSize);
             }
             else {
-                throw new Exception("NYI");
+                bool f = true;
+                for (int i=0; i<macSize; i++) {
+                    f &= (macResult[i] == data.GetBuffer()[extra + i]);
+                }
+                if (!f) throw new Exception("Authentication Failed");
+                resultLen = extra;
             }
 
             Reset(false);
@@ -305,6 +463,10 @@ namespace COSE
             if (clearMac) {
                 macResult = null;
             }
+            data.SetLength(0);
+            chacha20.Reset();
+            poly.Reset();
+            aadLength = 0;
         }
 
 
@@ -363,6 +525,18 @@ namespace COSE
                 0x2f , 0xe2 , 0x80 , 0x9c , 0x77 , 0x6f , 0x72 , 0x6b , 0x20 , 0x69 , 0x6e , 0x20 , 0x70 , 0x72 , 0x6f , 0x67,
                 0x72 , 0x65 , 0x73 , 0x73 , 0x2e , 0x2f , 0xe2 , 0x80 , 0x9d
             };
+
+            Poly1305 p = new Poly1305();
+            byte[] pKey = new byte[] { 0x85, 0xd6, 0xbe, 0x78, 0x57, 0x55, 0x6d, 0x33, 0x7f, 0x44, 0x52, 0xfe, 0x42, 0xd5, 0x06, 0xa8, 0x01, 0x03, 0x80, 0x8a, 0xfb, 0x0d, 0xb2, 0xfd, 0x4a, 0xbf, 0xf6, 0xaf, 0x41, 0x49, 0xf5, 0x1b
+            };
+            KeyParameter paramsX = new KeyParameter(pKey);
+            p.Init(paramsX);
+
+            byte[] msg = UTF8Encoding.ASCII.GetBytes("Cryptographic Forum Research Group");
+            p.BlockUpdate(msg, 0, msg.Length);
+            byte[] output = new byte[30];
+            p.DoFinal(output, 0);
+
 
             ChaCha20Poly1305 cipher = new ChaCha20Poly1305();
 

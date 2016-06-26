@@ -67,6 +67,13 @@ namespace COSE
                 case AlgorithmValuesInt.AES_CCM_64_128_256:
                     AES_CCM_Decrypt(alg, CEK);
                     break;
+
+                case AlgorithmValuesInt.ChaCha20_Poly1305:
+                    ChaCha20_Poly1305_Decrypt(alg, CEK);
+                    break;
+
+                default:
+                    throw new CoseException("Unknown algorithm found");
                 }
 
             }
@@ -195,6 +202,7 @@ namespace COSE
                 case AlgorithmValuesInt.AES_CCM_16_128_256:
                 case AlgorithmValuesInt.AES_CCM_64_64_256:
                 case AlgorithmValuesInt.AES_CCM_64_128_256:
+                case AlgorithmValuesInt.ChaCha20_Poly1305:
                     return 256;
 
                 default:
@@ -486,8 +494,7 @@ namespace COSE
 
         private byte[] ChaCha20_Poly1305(CBORObject alg, byte[] K)
         {
-            ChaChaEngine cipher = new ChaChaEngine();
-            Poly1305 poly;
+            ChaCha20Poly1305 cipher = new ChaCha20Poly1305();
 
             KeyParameter ContentKey;
             int cbitTag = 128;
@@ -523,13 +530,9 @@ namespace COSE
                 s_PRNG.NextBytes(K);
             }
 
-            //  Generate Poly1305 key
+            //  Generate key
 
             ContentKey = new KeyParameter(K);
-            ICipherParameters polyKey = new ParametersWithIV(ContentKey, IV);
-
-            poly = new Poly1305();
-            poly.Init(polyKey);
 
             //  Build the object to be hashed
 
@@ -538,27 +541,44 @@ namespace COSE
 
             cipher.Init(true, parameters);
 
-            byte[] C = new byte[rgbContent.Length];
-            cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
-
-            Array.Resize(ref C, C.Length + (cbitTag / 8));
-
-            poly.BlockUpdate(aad, 0, aad.Length);
-            byte[] zeros = new byte[16 - (aad.Length % 16)];
-            poly.BlockUpdate(zeros, 0, zeros.Length);
-            poly.BlockUpdate(rgbContent, 0, rgbContent.Length);
-            zeros = new byte[16 - (rgbContent.Length % 16)];
-            poly.BlockUpdate(zeros, 0, zeros.Length);
-            byte[] lengths;
-            lengths = BitConverter.GetBytes(aad.Length);
-            poly.BlockUpdate(lengths, 0, lengths.Length);
-            lengths = BitConverter.GetBytes(rgbContent.Length);
-            poly.BlockUpdate(lengths, 0, lengths.Length);
-            poly.DoFinal(C, C.Length);
+            byte[] C = new byte[cipher.GetOutputSize(rgbContent.Length)];
+            int len = cipher.ProcessBytes(rgbContent, 0, rgbContent.Length, C, 0);
+            len += cipher.DoFinal(C, len);
 
             rgbEncrypted = C;
 
             return K;
+
+        }
+
+        public void ChaCha20_Poly1305_Decrypt(CBORObject alg, byte[] K)
+        {
+            ChaCha20Poly1305 cipher = new ChaCha20Poly1305();
+            KeyParameter ContentKey;
+
+            //  The requirements from JWA
+            //  IV is 96 bits
+            //  Authentication tag is 128 bits
+            //  key sizes are 128, 192 and 256 bits
+
+            ContentKey = new KeyParameter(K);
+
+            byte[] IV = new byte[96 / 8];
+            CBORObject cbor = FindAttribute(HeaderKeys.IV);
+            if (cbor == null) throw new Exception("Missing IV");
+
+            if (cbor.Type != CBORType.ByteString) throw new CoseException("IV is incorrectly formed.");
+            if (cbor.GetByteString().Length > IV.Length) throw new CoseException("IV is too long.");
+            Array.Copy(cbor.GetByteString(), 0, IV, IV.Length - cbor.GetByteString().Length, cbor.GetByteString().Length);
+
+            AeadParameters parameters = new AeadParameters(ContentKey, 128, IV, getAADBytes());
+
+            cipher.Init(false, parameters);
+            byte[] C = new byte[cipher.GetOutputSize(rgbEncrypted.Length)];
+            int len = cipher.ProcessBytes(rgbEncrypted, 0, rgbEncrypted.Length, C, 0);
+            len += cipher.DoFinal(C, len);
+
+            rgbContent = C;
 
         }
 
@@ -852,6 +872,11 @@ namespace COSE
                 case AlgorithmValuesInt.Direct_HKDF_HMAC_SHA_512:
                     if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
                     return HKDF(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK, new Sha512Digest());
+
+                case AlgorithmValuesInt.Direct_HKDF_AES_128:
+                case AlgorithmValuesInt.Direct_HKDF_AES_256:
+                    if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_Octet) throw new CoseException("Needs to be an octet key");
+                    return HKDF_AES(m_key.AsBytes(CoseKeyParameterKeys.Octet_k), cbitCEK, algCEK);
 
                 case AlgorithmValuesInt.RSA_OAEP: return RSA_OAEP_KeyUnwrap(key, new Sha1Digest());
                 case AlgorithmValuesInt.RSA_OAEP_256: return RSA_OAEP_KeyUnwrap(key, new Sha256Digest());
@@ -1204,6 +1229,7 @@ namespace COSE
                     break;
 
                 case AlgorithmValuesInt.AES_GCM_256:
+                case AlgorithmValuesInt.ChaCha20_Poly1305:
                 case AlgorithmValuesInt.AES_CCM_16_64_256:
                 case AlgorithmValuesInt.AES_CCM_64_64_256:
                 case AlgorithmValuesInt.AES_CCM_16_128_256:
