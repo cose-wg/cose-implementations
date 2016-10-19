@@ -48,6 +48,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Sign0Message.cs" />
     <Compile Include="SignMessage.cs" />
+    <Compile Include="X25519.cs" />
   </ItemGroup>
   <ItemGroup>
     <WCFMetadata Include="Service References\" />

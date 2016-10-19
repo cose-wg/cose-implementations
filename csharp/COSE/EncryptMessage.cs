@@ -674,7 +674,7 @@ namespace COSE
                     case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_128:
                     case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_192:
                     case AlgorithmValuesInt.ECDH_SS_HKDF_256_AES_KW_256:
-                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameter");
+                        if ((key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) && (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_OKP)) throw new CoseException("Invalid Parameter");
                         m_recipientType = RecipientType.keyAgree;
                         break;
 
@@ -684,7 +684,7 @@ namespace COSE
                     case AlgorithmValuesInt.ECDH_SS_HKDF_256:
                     case AlgorithmValuesInt.ECDH_SS_HKDF_512:
 #endif // DEBUG
-                        if (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Invalid Parameters");
+                        if ((key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) && (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_OKP)) throw new CoseException("Invalid Parameters");
                         m_recipientType = RecipientType.keyAgreeDirect;
                         break;
 
@@ -1281,7 +1281,7 @@ namespace COSE
 
                 case AlgorithmValuesInt.ECDH_ES_HKDF_256:
                     {
-                        if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key management algorithm don't match");
+                        if ((m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) && (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_OKP)) throw new CoseException("Key and key management algorithm don't match");
 
                         ECDH_GenerateEphemeral();
 
@@ -1302,7 +1302,8 @@ namespace COSE
 
                 case AlgorithmValuesInt.ECDH_SS_HKDF_256:
                     {
-                        if (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) throw new CoseException("Key and key managment algorithm don't match");
+                        if ((m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC) &&
+                            (m_key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_OKP)) throw new CoseException("Key and key managment algorithm don't match");
                         if (FindAttribute(CoseKeyParameterKeys.HKDF_Context_PartyU_nonce) == null) {
                             byte[] rgbAPU = new byte[512 / 8];
                             s_PRNG.NextBytes(rgbAPU);
@@ -1489,31 +1490,48 @@ namespace COSE
         public static bool FUseCompressed = true;
         private void ECDH_GenerateEphemeral()
         {
-            X9ECParameters p = m_key.GetCurve();
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-
-            ECKeyPairGenerator pGen = new ECKeyPairGenerator();
-            ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, s_PRNG);
-            pGen.Init(genParam);
-
-            AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
-
             CBORObject epk = CBORObject.NewMap();
-            epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
-            epk.Add(CoseKeyParameterKeys.EC_Curve, m_key[CoseKeyParameterKeys.EC_Curve]);
-            ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+            epk.Add(CoseKeyKeys.KeyType, m_key[CoseKeyKeys.KeyType]);
 
-            if (FUseCompressed) {
-                byte[] rgbEncoded = priv.Q.Normalize().GetEncoded(true);
-                byte[] X = new byte[rgbEncoded.Length - 1];
-                Array.Copy(rgbEncoded, 1, X, 0, X.Length);
-                epk.Add(CoseKeyParameterKeys.EC_X, CBORObject.FromObject(X));
-                epk.Add(CoseKeyParameterKeys.EC_Y, CBORObject.FromObject((rgbEncoded[0] & 1) == 1));
+            switch (m_key.GetKeyType()) {
+            case GeneralValuesInt.KeyType_OKP:
+                epk.Add(CoseKeyParameterKeys.OKP_Curve, m_key[CoseKeyParameterKeys.OKP_Curve]);
+                switch ((GeneralValuesInt) epk[CoseKeyParameterKeys.OKP_Curve].AsInt32()) {
+                case GeneralValuesInt.X25519:
+                    X25519KeyPair keyPair = X25519.GenerateKeyPair();
+                    epk.Add(CoseKeyParameterKeys.OKP_X, keyPair.Public);
+                    epk.Add(CoseKeyParameterKeys.OKP_D, keyPair.Private);
+                    break;
+                }
+                break;
+
+            case GeneralValuesInt.KeyType_EC2:
+                X9ECParameters p = m_key.GetCurve();
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+
+                ECKeyPairGenerator pGen = new ECKeyPairGenerator();
+                ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, s_PRNG);
+                pGen.Init(genParam);
+
+                AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
+
+                ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+
+                epk.Add(CoseKeyParameterKeys.EC_Curve, m_key[CoseKeyParameterKeys.EC_Curve]);
+                if (FUseCompressed) {
+                    byte[] rgbEncoded = priv.Q.Normalize().GetEncoded(true);
+                    byte[] X = new byte[rgbEncoded.Length - 1];
+                    Array.Copy(rgbEncoded, 1, X, 0, X.Length);
+                    epk.Add(CoseKeyParameterKeys.EC_X, CBORObject.FromObject(X));
+                    epk.Add(CoseKeyParameterKeys.EC_Y, CBORObject.FromObject((rgbEncoded[0] & 1) == 1));
+                }
+                else {
+                    epk.Add(CoseKeyParameterKeys.EC_X, PadBytes(priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
+                    epk.Add(CoseKeyParameterKeys.EC_Y, PadBytes(priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
+                }
+                break;
             }
-            else {
-                epk.Add(CoseKeyParameterKeys.EC_X, PadBytes(priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
-                epk.Add(CoseKeyParameterKeys.EC_Y, PadBytes(priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned(), p.Curve.FieldSize));
-            }
+
             AddUnprotected(HeaderKeys.EphemeralKey, epk);
         }
 
@@ -1530,8 +1548,7 @@ namespace COSE
         {
             Key epk;
 
-            if ((key[CoseKeyKeys.KeyType].Type != CBORType.Number) &&
-                (key[CoseKeyKeys.KeyType] != GeneralValues.KeyType_EC)) throw new CoseException("Not an EC Key");
+            if (key[CoseKeyKeys.KeyType].Type != CBORType.Number) throw new CoseException("Not an EC Key");
 
             if (m_senderKey != null) {
                 epk = m_senderKey;
@@ -1548,30 +1565,54 @@ namespace COSE
                 }
             }
 
-            if (epk[CoseKeyParameterKeys.EC_Curve].AsInt32() != key[CoseKeyParameterKeys.EC_Curve].AsInt32()) throw new CoseException("not a match of curves");
+            byte[] temp;
 
-            //  Get the curve
+            switch ((GeneralValuesInt) key[CoseKeyKeys.KeyType].AsInt32()) {
+            case GeneralValuesInt.KeyType_OKP:
+                if (epk[CoseKeyParameterKeys.OKP_Curve].AsInt32() != key[CoseKeyParameterKeys.OKP_Curve].AsInt32()) throw new CoseException("Not a match of curves");
 
-            X9ECParameters p =  key.GetCurve();
-            ECPoint pubPoint = epk.GetPoint();
+                switch ((GeneralValuesInt) epk[CoseKeyParameterKeys.OKP_Curve].AsInt32()) {
+                case GeneralValuesInt.X25519:
+                    temp = X25519.CalculateAgreement(key.AsBytes(CoseKeyParameterKeys.OKP_X), epk.AsBytes(CoseKeyParameterKeys.OKP_D));
+                    break;
 
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                default:
+                    throw new CoseException("Not a supported Curve");
+                }
+#if FOR_EXAMPLES
+                m_secret = temp;
+#endif
+                return temp;
 
+            case GeneralValuesInt.KeyType_EC2:
 
-            ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
+                if (epk[CoseKeyParameterKeys.EC_Curve].AsInt32() != key[CoseKeyParameterKeys.EC_Curve].AsInt32()) throw new CoseException("not a match of curves");
 
-            ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger(CoseKeyParameterKeys.EC_D), parameters);
+                //  Get the curve
 
-            IBasicAgreement e1 = new ECDHBasicAgreement();
-            e1.Init(priv);
+                X9ECParameters p = key.GetCurve();
+                ECPoint pubPoint = epk.GetPoint();
 
-            BigInteger k1 = e1.CalculateAgreement(pub);
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+
+                ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
+
+                ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger(CoseKeyParameterKeys.EC_D), parameters);
+
+                IBasicAgreement e1 = new ECDHBasicAgreement();
+                e1.Init(priv);
+
+                BigInteger k1 = e1.CalculateAgreement(pub);
 
 #if FOR_EXAMPLES
-            m_secret = PadBytes( k1.ToByteArrayUnsigned(), p.Curve.FieldSize);
+                m_secret = PadBytes(k1.ToByteArrayUnsigned(), p.Curve.FieldSize);
 #endif
 
-            return PadBytes(k1.ToByteArrayUnsigned(), p.Curve.FieldSize);
+                return PadBytes(k1.ToByteArrayUnsigned(), p.Curve.FieldSize);
+
+            default:
+                throw new CoseException("Not an EC Key");
+            }
         }
 
         public byte[] GetKDFInput(int cbitKey, CBORObject algorithmID)

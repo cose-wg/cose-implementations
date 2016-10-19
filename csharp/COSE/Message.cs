@@ -157,6 +157,10 @@ namespace COSE
         static public readonly CBORObject EC_Y = CBORObject.FromObject(-3);
         static public readonly CBORObject EC_D = CBORObject.FromObject(-4);
 
+        static public readonly CBORObject OKP_Curve = CBORObject.FromObject(-1);
+        static public readonly CBORObject OKP_X = CBORObject.FromObject(-2);
+        static public readonly CBORObject OKP_D = CBORObject.FromObject(-4);
+
         static public readonly CBORObject RSA_e = CBORObject.FromObject(-1);
         static public readonly CBORObject RSA_n = CBORObject.FromObject(-2);
         static public readonly CBORObject RSA_d = CBORObject.FromObject(-3);
@@ -186,20 +190,23 @@ namespace COSE
 
     public enum GeneralValuesInt
     {
-        KeyType_EC1 = 1, KeyType_EC2=2, KeyType_RSA=3, KeyType_Octet = 4,
-        P256=1, P384=2, P521=3, 
-        Curve25519=1, Goldilocks=2
+        KeyType_OKP = 1, KeyType_EC2=2, KeyType_RSA=3, KeyType_Octet = 4,
+        P256=1, P384=2, P521=3, X25519=4, X448=5, Ed25519=6, Ed448=7
     }
 
     public class GeneralValues
     {
+        static public readonly CBORObject KeyType_OKP = CBORObject.FromObject(GeneralValuesInt.KeyType_OKP);
         static public readonly CBORObject KeyType_EC = CBORObject.FromObject(GeneralValuesInt.KeyType_EC2);
         static public readonly CBORObject KeyType_RSA = CBORObject.FromObject(GeneralValuesInt.KeyType_RSA);
         static public readonly CBORObject KeyType_Octet = CBORObject.FromObject(GeneralValuesInt.KeyType_Octet);
         static public readonly CBORObject P256 = CBORObject.FromObject(GeneralValuesInt.P256);
         static public readonly CBORObject P384 = CBORObject.FromObject(GeneralValuesInt.P384);
         static public readonly CBORObject P521 = CBORObject.FromObject(GeneralValuesInt.P521);
-
+        static public readonly CBORObject X25519 = CBORObject.FromObject(GeneralValuesInt.X25519);
+        static public readonly CBORObject X448 = CBORObject.FromObject(GeneralValuesInt.X448);
+        static public readonly CBORObject Ed25519 = CBORObject.FromObject(GeneralValuesInt.Ed25519);
+        static public readonly CBORObject Ed448 = CBORObject.FromObject(GeneralValuesInt.Ed448);
     }
 
     public abstract class Message : Attributes

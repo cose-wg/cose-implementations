@@ -14,6 +14,7 @@ using Org.BouncyCastle.Crypto.Agreement;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 
+using Org.BouncyCastle.Crypto.EC;
 using Org.BouncyCastle.Math.EC;
 
 namespace COSE
@@ -150,12 +151,18 @@ namespace COSE
             return m_map;
         }
 
+        public GeneralValuesInt GetKeyType()
+        {
+            return (GeneralValuesInt) m_map[CoseKeyKeys.KeyType].AsInt32();
+        }
+
         public X9ECParameters GetCurve()
         {
             CBORObject cborKeyType = m_map[CoseKeyKeys.KeyType];
 
             if (cborKeyType == null) throw new CoseException("Malformed key struture");
-            if ((cborKeyType.Type != CBORType.Number) && (cborKeyType != GeneralValues.KeyType_EC)) throw new CoseException("Not an EC key");
+            if ((cborKeyType.Type != CBORType.Number) && 
+                !((cborKeyType == GeneralValues.KeyType_EC) || (cborKeyType == GeneralValues.KeyType_OKP))) throw new CoseException("Not an EC key");
 
             CBORObject cborCurve = m_map[CoseKeyParameterKeys.EC_Curve];
             if (cborCurve.Type == CBORType.Number) {
@@ -163,6 +170,7 @@ namespace COSE
                 case GeneralValuesInt.P256: return NistNamedCurves.GetByName("P-256");
                 case GeneralValuesInt.P384: return NistNamedCurves.GetByName("P-384");
                 case GeneralValuesInt.P521: return NistNamedCurves.GetByName("P-521");
+                case GeneralValuesInt.X25519: return CustomNamedCurves.GetByName("CURVE25519");
                 default:
                     throw new CoseException("Unsupported key type: " + cborKeyType.AsInt32());
                 }
@@ -179,20 +187,31 @@ namespace COSE
         public ECPoint GetPoint()
         {
             X9ECParameters p = this.GetCurve();
-            CBORObject y = this.AsCBOR()[CoseKeyParameterKeys.EC_Y];
             Org.BouncyCastle.Math.EC.ECPoint pubPoint;
 
-            if (y.Type == CBORType.Boolean) {
-                byte[] X = this.AsBytes(CoseKeyParameterKeys.EC_X);
-                byte[] rgb = new byte[X.Length + 1];
-                Array.Copy(X, 0, rgb, 1, X.Length);
-                rgb[0] = (byte) (2 + (y.AsBoolean() ? 1 : 0));
-                pubPoint = p.Curve.DecodePoint(rgb);
-            }
-            else {
-                pubPoint = p.Curve.CreatePoint(this.AsBigInteger(CoseKeyParameterKeys.EC_X), this.AsBigInteger(CoseKeyParameterKeys.EC_Y));
-            }
+            switch ((GeneralValuesInt) this[CoseKeyKeys.KeyType].AsInt32()) {
+            case GeneralValuesInt.KeyType_EC2:
+                CBORObject y = this.AsCBOR()[CoseKeyParameterKeys.EC_Y];
 
+                if (y.Type == CBORType.Boolean) {
+                    byte[] X = this.AsBytes(CoseKeyParameterKeys.EC_X);
+                    byte[] rgb = new byte[X.Length + 1];
+                    Array.Copy(X, 0, rgb, 1, X.Length);
+                    rgb[0] = (byte) (2 + (y.AsBoolean() ? 1 : 0));
+                    pubPoint = p.Curve.DecodePoint(rgb);
+                }
+                else {
+                    pubPoint = p.Curve.CreatePoint(this.AsBigInteger(CoseKeyParameterKeys.EC_X), this.AsBigInteger(CoseKeyParameterKeys.EC_Y));
+                }
+                break;
+
+            case GeneralValuesInt.KeyType_OKP:
+                pubPoint = p.Curve.CreatePoint(this.AsBigInteger(CoseKeyParameterKeys.EC_X), new Org.BouncyCastle.Math.BigInteger("0"));
+                break;
+
+            default:
+                throw new Exception("Unknown key type");
+            }
             return pubPoint;
         }
 
@@ -237,25 +256,49 @@ namespace COSE
 
         public static void NewKey()
         {
-            X9ECParameters p = NistNamedCurves.GetByName("P-256");
+            if (false) {
+                X9ECParameters p = NistNamedCurves.GetByName("P-256");
 
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            ECKeyPairGenerator pGen = new ECKeyPairGenerator();
-           ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, new Org.BouncyCastle.Security.SecureRandom());
-            pGen.Init(genParam);
+                ECKeyPairGenerator pGen = new ECKeyPairGenerator();
+                ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, new Org.BouncyCastle.Security.SecureRandom());
+                pGen.Init(genParam);
 
-            AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
+                AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
 
-            CBORObject epk = CBORObject.NewMap();
-            epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
-            epk.Add(CoseKeyParameterKeys.EC_Curve, "P-384");
-            ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add(CoseKeyParameterKeys.EC_Y, priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add(CoseKeyParameterKeys.EC_D, ((ECPrivateKeyParameters) p1.Private).D.ToByteArrayUnsigned());
+                CBORObject epk = CBORObject.NewMap();
+                epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_EC);
+                epk.Add(CoseKeyParameterKeys.EC_Curve, "P-384");
+                ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+                epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+                epk.Add(CoseKeyParameterKeys.EC_Y, priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
+                epk.Add(CoseKeyParameterKeys.EC_D, ((ECPrivateKeyParameters) p1.Private).D.ToByteArrayUnsigned());
 
-            string xxx = epk.ToJSONString();
+                string xxx = epk.ToJSONString();
+            }
+            else {
+                X9ECParameters p = CustomNamedCurves.GetByName("CURVE25519");
+
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+
+                ECKeyPairGenerator pGen = new ECKeyPairGenerator();
+                ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, new Org.BouncyCastle.Security.SecureRandom());
+                pGen.Init(genParam);
+
+                AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
+
+                CBORObject epk = CBORObject.NewMap();
+                epk.Add(CoseKeyKeys.KeyType, GeneralValues.KeyType_OKP);
+                epk.Add(CoseKeyParameterKeys.OKP_Curve, GeneralValues.X25519);
+                ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+                epk.Add(CoseKeyParameterKeys.EC_X, priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+                epk.Add(CoseKeyParameterKeys.EC_D, ((ECPrivateKeyParameters) p1.Private).D.ToByteArrayUnsigned());
+
+                string xxx = epk.ToJSONString();
+
+
+            }
         }
     }
 
