@@ -70,7 +70,7 @@ namespace JOSE
         }
     }
 
-    class KeySet
+    public class KeySet
     {
         List<Key> keys = new List<Key>();
 

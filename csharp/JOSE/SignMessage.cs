@@ -35,10 +35,6 @@ namespace JOSE
         {
             //  Parse out the message from the JSON
 
-            if (json.ContainsKey("payload")) {
-                payloadB64 = UTF8Encoding.UTF8.GetBytes(json["payload"].AsString());
-                payload = base64urldecode(json["payload"].AsString());
-            }
 
             if (json.ContainsKey("signatures")) {
                 JSON signers = json["signatures"];
@@ -51,6 +47,26 @@ namespace JOSE
                 Signer signer = new Signer(json);
                 signerList.Add(signer);
             }
+
+            if (json.ContainsKey("payload")) {
+                JSON b64 = signerList[0].FindAttribute("b64", true);
+                if (b64 != null) {
+                    if (b64.nodeType != JsonType.boolean) throw new Exception("Invalid message");
+                    if (b64.AsBoolean()) {
+                        payloadB64 = UTF8Encoding.UTF8.GetBytes(json["payload"].AsString());
+                        payload = base64urldecode(json["payload"].AsString());
+                    }
+                    else {
+                        payload = UTF8Encoding.UTF8.GetBytes(json["payload"].AsString());
+                        payloadB64 = payload;
+                    }
+                }
+                else {
+                    payloadB64 = UTF8Encoding.UTF8.GetBytes(json["payload"].AsString());
+                    payload = base64urldecode(json["payload"].AsString());
+                }
+            }
+
         }
 
         public void AddSigner(Signer sig)
@@ -337,7 +353,7 @@ namespace JOSE
                     ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign.AsBytes("d")), parameters);
                     ParametersWithRandom param = new ParametersWithRandom(privKey, Message.s_PRNG);
 
-                    ECDsaSigner ecdsa = new ECDsaSigner();
+                    ECDsaSigner ecdsa = new ECDsaSigner(new HMacDsaKCalculator(new Sha256Digest()));
                     ecdsa.Init(true, param);
 
                     BigInteger[] sig = ecdsa.GenerateSignature(bytesToBeSigned);
@@ -371,6 +387,7 @@ namespace JOSE
         public void Verify(Key key, SignMessage msg)
         {
             string alg = FindAttr("alg", msg).AsString();
+            COSE.EdDSA eddsa;
 
             IDigest digest;
             IDigest digest2;
@@ -398,6 +415,11 @@ namespace JOSE
             case "HS512":
                 digest = new Sha512Digest();
                 digest2 = new Sha512Digest();
+                break;
+
+            case "EdDSA":
+                digest = null;
+                digest2 = null;
                 break;
 
             default:
@@ -488,6 +510,27 @@ namespace JOSE
                 }
                 break;
 
+            case "EdDSA":
+                if (key.AsString("kty") != "OKP") throw new JOSE_Exception("Wrong Key Type");
+                switch (key.AsString("crv")) {
+                case "Ed25519":
+                    eddsa = new COSE.EdDSA25517();
+                    break;
+
+                default:
+                    throw new JOSE_Exception("Unknown OKP curve");
+                }
+                COSE.EdDSAPoint eddsaPoint = eddsa.DecodePoint(key.AsBytes("x"));
+
+                byte[] toVerify = new byte[protectedB64.Length + rgbDot.Length + msg.payloadB64.Length];
+                Array.Copy(protectedB64, 0, toVerify, 0, protectedB64.Length);
+                Array.Copy(rgbDot, 0, toVerify, protectedB64.Length, rgbDot.Length);
+                Array.Copy(msg.payloadB64, 0, toVerify, protectedB64.Length + rgbDot.Length, msg.payloadB64.Length);
+
+                if (!eddsa.Verify(key.AsBytes("x"), toVerify, signature)) throw new JOSE_Exception("Signature did not validate");
+
+                break;
+            
             default:
                 throw new JOSE_Exception("Unknown algorithm");
             }

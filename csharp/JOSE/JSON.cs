@@ -8,7 +8,7 @@ namespace JOSE
 {
     public enum JsonType
     {
-        unknown = -1, map = 1, text = 2, array = 3, number = 4
+        unknown = -1, map = 1, text = 2, array = 3, number = 4, boolean = 5
     }
 
     public class JSON
@@ -105,6 +105,14 @@ namespace JOSE
             case '8':
             case '9':
                 offset += ParseNumber(offset);
+                break;
+
+            case 'f':
+                offset += ParseWord(offset, "false");
+                break;
+
+            case 't':
+                offset += ParseWord(offset, "true");
                 break;
 
             default:
@@ -265,6 +273,26 @@ namespace JOSE
             return offset - offsetStart;
         }
 
+        private int ParseWord(int offsetStart, string word)
+        {
+            int offset = offsetStart;
+
+            for (int i = 0; i < word.Length; i++) {
+                if (source[offset + i] != word[i]) throw new Exception("Invalid JSON matching " + word);
+            }
+
+            offset += word.Length;
+            offset += SkipWhiteSpace(offset);
+
+            switch (word) {
+            case "false": nodeType = JsonType.boolean; number = 0; break;
+            case "true": nodeType = JsonType.boolean; number = -1; break;
+            default: throw new Exception("ICE");
+            }
+
+            return offset - offsetStart;
+        }
+
         private int SkipWhiteSpace(int offsetStart)
         {
             int offset = offsetStart;
@@ -367,6 +395,12 @@ namespace JOSE
         {
             if (nodeType != JsonType.text) throw new Exception("Not a string");
             return JOSE.Message.base64urldecode(text);
+        }
+
+        public Boolean AsBoolean()
+        {
+            if (nodeType != JsonType.boolean) throw new Exception("Not a boolean");
+            return number != 0;
         }
 
         public int Count
