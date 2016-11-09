@@ -51,6 +51,10 @@
       <Project>{4c235092-820c-4deb-9074-d356fb797d8b}</Project>
       <Name>BouncyCastle</Name>
     </ProjectReference>
+    <ProjectReference Include="..\COSE\COSE.csproj">
+      <Project>{d02f476f-bc2c-4d01-bede-eb8e79dd050e}</Project>
+      <Name>COSE</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

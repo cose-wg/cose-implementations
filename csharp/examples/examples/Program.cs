@@ -25,9 +25,12 @@ namespace examples
         static void Main(string[] args)
         {
             COSE.Key.NewKey();
-            COSE.ChaCha20Poly1305.SelfTest();
+
+            COSE.EdDSA25517.SelfTest();
+            COSE.EdDSA448.SelfTest();
 
             COSE.Recipient.FUseCompressed = true;
+            RunTestsInDirectory("X25519-tests");
 
             RunTestsInDirectory("spec-examples");
             {
@@ -998,6 +1001,7 @@ namespace examples
                 case "kty":
                     newKey = COSE.CoseKeyKeys.KeyType;
                     switch (control[item].AsString()) {
+                    case "OKP": newValue = COSE.GeneralValues.KeyType_OKP; goto NewValue;
                     case "EC": newValue = COSE.GeneralValues.KeyType_EC; goto NewValue;
                     case "RSA": newValue = COSE.GeneralValues.KeyType_RSA; goto NewValue;
                     case "oct": newValue = COSE.GeneralValues.KeyType_Octet; goto NewValue;
@@ -1052,6 +1056,10 @@ namespace examples
                         oFix = 66;
                         break;
 
+                    case "X25519":
+                        newValue = COSE.GeneralValues.X25519;
+                        break;
+
                     default:
                         newValue = control[item];
                         break;
@@ -1067,7 +1075,11 @@ namespace examples
                     key.Add(CBORObject.FromObject(item), control[item]);
                     break;
 
-                case "x": newKey = COSE.CoseKeyParameterKeys.EC_X; goto BinaryValue;
+                case "x":
+                    if (type == "OKP") newKey = COSE.CoseKeyParameterKeys.OKP_X;
+                    else newKey = COSE.CoseKeyParameterKeys.EC_X;
+                    goto BinaryValue;
+
                 case "y": newKey = COSE.CoseKeyParameterKeys.EC_Y; goto BinaryValue;
 
                 case "e": newKey = COSE.CoseKeyParameterKeys.RSA_e; goto BinaryValue;
@@ -1076,6 +1088,7 @@ namespace examples
                 case "d":
                     // if (!fPublicKey) continue;
                     if (type == "RSA") newKey = COSE.CoseKeyParameterKeys.RSA_d;
+                    else if (type == "OKP") newKey = COSE.CoseKeyParameterKeys.OKP_D;
                     else newKey = COSE.CoseKeyParameterKeys.EC_D;
                     goto BinaryValue;
 

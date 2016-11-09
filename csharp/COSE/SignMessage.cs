@@ -445,7 +445,7 @@ namespace COSE
                         ECPrivateKeyParameters privKey = new ECPrivateKeyParameters("ECDSA", ConvertBigNum(keyToSign[CoseKeyParameterKeys.EC_D]), parameters);
                         ParametersWithRandom param = new ParametersWithRandom(privKey, random);
 
-                        ECDsaSigner ecdsa = new ECDsaSigner();
+                        ECDsaSigner ecdsa = new ECDsaSigner(new HMacDsaKCalculator(new Sha256Digest()));
                         ecdsa.Init(true, param);
 
                         BigInteger[] sig = ecdsa.GenerateSignature(digestedMessage);
