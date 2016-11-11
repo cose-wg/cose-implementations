@@ -10,7 +10,7 @@ namespace JOSE
 {
     public abstract class Message : Attributes
     {
-        public static SecureRandom s_PRNG = null;
+        public static SecureRandom s_PRNG = new SecureRandom();
 
   
         public static void SetPRNG(SecureRandom prng)
@@ -181,7 +181,7 @@ namespace JOSE
             public JSON FindAttr(string key, Attributes msg)
             {
                 JSON j = FindAttribute(key);
-                if (j == null) j = msg.FindAttribute(key);
+                if ((j == null) && (msg != null)) j = msg.FindAttribute(key);
                 return j;
             }
 

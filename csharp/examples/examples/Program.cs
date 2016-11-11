@@ -24,6 +24,12 @@ namespace examples
 
         static void Main(string[] args)
         {
+            // RunCoseExamples();
+            JoseExamples.RunTests();
+        }
+
+        static void RunCoseExamples()
+        { 
             COSE.Key.NewKey();
 
             COSE.EdDSA25517.SelfTest();

@@ -13,7 +13,7 @@ namespace COSE
 
     public enum Tags
     { 
-        Encrypted = 993, Enveloped =992,Signed = 991, MAC = 994, MAC0=996, Signed0=997, Unknown = 0
+        Encrypted = 16, Enveloped =96,Signed = 98, MAC = 97, MAC0=17, Signed0=18, Unknown = 0
     }
 
     public class RecordKeys
