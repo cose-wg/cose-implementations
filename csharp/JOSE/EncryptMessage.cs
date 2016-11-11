@@ -251,11 +251,6 @@ namespace JOSE
                 AddUnprotected("enc", "A128GCM");
             }
 
-            //  Encode the protected attributes if there are any
-
-            if (objProtected.Count > 0) {
-                strProtected = base64urlencode(UTF8Encoding.UTF8.GetBytes(  objProtected.ToString()));
-            }
 
             byte[] ContentKey = null;
 
@@ -279,6 +274,52 @@ namespace JOSE
 
             if (recipientTypes == 3) throw new JOSE_Exception("It is not legal to mix direct and indirect recipients in a message");
 
+            if (ContentKey == null) {
+                switch (alg) {
+                case "A128GCM":
+                case "AES-128-CCM-64":
+                    ContentKey = new byte[128 / 8];
+                    break;
+
+                case "AES192GCM":
+                    ContentKey = new byte[192 / 8];
+                    break;
+
+                case "AES256GCM":
+                    ContentKey = new byte[256 / 8];
+                    break;
+
+                case "A128CBC-HS256":
+                    ContentKey = new byte[2*128 / 8];
+                    break;
+
+                case "A192CBC-HS256":
+                    ContentKey = new byte[2*192 / 8];
+                    break;
+
+                case "A256CBC-HS256":
+                    ContentKey = new byte[2*256 / 8];
+                    break;
+
+                default:
+                    throw new JOSE_Exception("Internal Error");
+
+                }
+
+                s_PRNG.NextBytes(ContentKey);
+            }
+
+            foreach (Recipient key in recipientList) {
+                key.SetContent(ContentKey);
+                key.Encrypt(this);
+            }
+
+            //  Encode the protected attributes if there are any
+
+            if (objProtected.Count > 0) {
+                strProtected = base64urlencode(UTF8Encoding.UTF8.GetBytes(objProtected.ToString()));
+            }
+
             switch (alg) {
             case "A128GCM":
             case "A192GCM":
@@ -301,10 +342,6 @@ namespace JOSE
             }
 
 
-            foreach (Recipient key in recipientList) {
-                key.SetContent(ContentKey);
-                key.Encrypt(this);
-            }
 
             return;
         }
@@ -374,26 +411,6 @@ namespace JOSE
 
             IV = new byte[96 / 8];
             s_PRNG.NextBytes(IV);
-
-            if (K == null) {
-                switch (alg) {
-                case "A128GCM":
-                    K = new byte[128 / 8];
-                    break;
-
-                case "A196GCM":
-                    K = new byte[196 / 8];
-                    break;
-
-                case "A256GCM":
-                    K = new byte[256 / 8];
-                    break;
-
-                default:
-                    throw new JOSE_Exception("Unsupported algorithm: " + alg);
-                }
-                s_PRNG.NextBytes(K);
-            }
 
             ContentKey = new KeyParameter(K);
 
@@ -466,11 +483,6 @@ namespace JOSE
 
             IV = new byte[128 / 8];
             s_PRNG.NextBytes(IV);
-
-            if (K == null) {
-                K = new byte[2*t_len];
-                s_PRNG.NextBytes(K);
-            }
 
             key = new KeyParameter(K, t_len, t_len);
             ICipherParameters parms = new ParametersWithIV(key, IV);
@@ -604,29 +616,6 @@ namespace JOSE
             IV = new byte[96 / 8];
             s_PRNG.NextBytes(IV);
 
-            if (K == null) {
-                switch (alg) {
-                case "AES-128-CCM-64":
-                    K = new byte[128 / 8];
-                    cbitTag = 64;
-                    break;
-
-                case "AES-196-CCM-64":
-                    K = new byte[196 / 8];
-                    cbitTag = 64;
-                    break;
-
-                case "AES-256-CCM-64":
-                    K = new byte[256 / 8];
-                    cbitTag = 64;
-                    break;
-
-                default:
-                    throw new JOSE_Exception("Unsupported algorithm: " + alg);
-                }
-                s_PRNG.NextBytes(K);
-            }
-
             ContentKey = new KeyParameter(K);
 
             //  Build the object to be hashed
@@ -667,7 +656,7 @@ namespace JOSE
 
         public Recipient() { }
 
-        public Recipient(Key key, string algorithm = null)
+        public Recipient(Key key, string algorithm = null, EncryptMessage msg = null)
         {
             if (algorithm != null) {
                 switch (algorithm) {
@@ -680,7 +669,7 @@ namespace JOSE
 #if DEBUG
                 case "ECDH-SS":
 #endif // DEBUG
-                    if (key.AsString("kty") != "EC") throw new JOSE_Exception("Invalid Parameters");
+                    if ((key.AsString("kty") != "EC") && (key.AsString("kty") != "OKP")) throw new JOSE_Exception("Invalid Parameters");
                     m_recipientType = RecipientType.keyAgreeDirect;
                     break;
 
@@ -704,7 +693,7 @@ namespace JOSE
                 case "ECDH-ES+A128KW":
                 case "ECDH-ES+A192KW":
                 case "ECDH-ES+A256KW":
-                    if (key.AsString("kty") != "EC") throw new JOSE_Exception("Invalid Parameter");
+                    if ((key.AsString("kty") != "EC") && (key.AsString("kty") != "OKP")) throw new JOSE_Exception("Invalid Parameter");
                     m_recipientType = RecipientType.keyAgree;
                     break;
 
@@ -719,7 +708,9 @@ namespace JOSE
                     throw new JOSE_Exception("Unrecognized recipient algorithm");
                 }
                 m_key = key;
-                AddUnprotected("alg", algorithm);
+                if (FindAttr("alg", msg) == null) {
+                    AddUnprotected("alg", algorithm);
+                }
             }
             else {
                 switch (key.AsString("kty")) {
@@ -753,7 +744,9 @@ namespace JOSE
                     algorithm = "ECDH-ES+A128KW";
                     break;
                 }
-                AddUnprotected("alg", algorithm);
+                if (FindAttr("alg", msg) == null) {
+                    AddUnprotected("alg", algorithm);
+                }
                 m_key = key;
             }
 
@@ -778,7 +771,9 @@ namespace JOSE
                 if (!validUsage) throw new JOSE_Exception("Key cannot be used for encryption");
             }
 
-            if (key.ContainsName("kid")) AddUnprotected("kid", key.AsString("kid"));
+            if (key.ContainsName("kid") && (FindAttr("kid", msg) == null)) {
+                AddUnprotected("kid", key.AsString("kid"));
+            }
         }
 
         public RecipientType recipientType { get { return m_recipientType; } }
@@ -807,7 +802,7 @@ namespace JOSE
                 return key.AsBytes("k");
 
             case "ECDH-ES": {
-                    if (key.AsString("kty") != "EC") return null;
+                    if ((key.AsString("kty") != "EC") && (key.AsString("kty") != "OKP")) return null;
 
                     byte[] secret = ECDH(key, msg);
                     byte[] kwKey = KDF(secret, msg, cbitKey, FindAttr("enc", msg).AsString());
@@ -856,7 +851,7 @@ namespace JOSE
                 }
 
             case "ECDH-ES+A128KW": {
-                    if (key.AsString("kty") != "EC") return null;
+                    if ((key.AsString("kty") != "EC") && (key.AsString("kty") !="OKP")) return null;
 
                     byte[] secret = ECDH(key, msg);
                     byte[] kwKey = KDF(secret, msg, 128, FindAttr("alg", msg).AsString());
@@ -957,7 +952,7 @@ namespace JOSE
                 return rgb;
 
             case "ECDH-ES": {
-                    if (m_key.AsString("kty") != "EC") throw new Exception("Key and key management algorithm don't match");
+                    if ((m_key.AsString("kty") != "EC") && (m_key.AsString("kty") != "OKP")) throw new Exception("Key and key management algorithm don't match");
 
                     ECDH_GenerateEphemeral(msg);
 
@@ -1159,7 +1154,8 @@ namespace JOSE
 
         private byte[] ECDH(Key key, EncryptMessage msg)
         {
-            if (key.AsString("kty") != "EC") throw new Exception("Not an EC Key");
+            if ((key.AsString("kty") != "EC") && (key.AsString("kty") != "OKP")) throw new Exception("Not an EC or OKP Key");
+
             JSON epkT = FindAttribute("epk");
             if (epkT == null) {
                 epkT = msg.FindAttribute("epk");
@@ -1170,51 +1166,82 @@ namespace JOSE
             if (epk.AsString("crv") != key.AsString("crv")) throw new Exception("not a match of curves");
 
             //  Get the curve
+            if (key.AsString("kty") == "EC") {
+                X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
+                ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
-            ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
+                ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
 
-            ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
+                IBasicAgreement e1 = new ECDHBasicAgreement();
+                e1.Init(priv);
 
-            IBasicAgreement e1 = new ECDHBasicAgreement();
-            e1.Init(priv);
+                BigInteger k1 = e1.CalculateAgreement(pub);
 
-            BigInteger k1 = e1.CalculateAgreement(pub);
+                return k1.ToByteArrayUnsigned();
+            }
+            else {
+                switch (epk.AsString("crv")) {
+                case "X25519":
+                    return COSE.X25519.CalculateAgreement(epk.AsBytes("x"), key.AsBytes("d"));
 
-            return k1.ToByteArrayUnsigned();
+                default:
+                    throw new JOSE_Exception("Unsupported curve");
+                }
+            }
         }
 
         private void ECDH_GenerateEphemeral(EncryptMessage msg)
         {
-            X9ECParameters p = NistNamedCurves.GetByName(m_key.AsString("crv"));
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
-
-            ECKeyPairGenerator pGen = new ECKeyPairGenerator();
-            ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, s_PRNG);
-            pGen.Init(genParam);
-
-            AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
-
             JSON epk = new JSON();
-            epk.Add("kty", "EC");
-            epk.Add("crv", m_key.AsString("crv"));
-            ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
-            epk.Add("x", priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
-            epk.Add("y", priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
 
+            if (m_key.AsString("kty") == "EC2") {
+                X9ECParameters p = NistNamedCurves.GetByName(m_key.AsString("crv"));
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+
+                ECKeyPairGenerator pGen = new ECKeyPairGenerator();
+                ECKeyGenerationParameters genParam = new ECKeyGenerationParameters(parameters, s_PRNG);
+                pGen.Init(genParam);
+
+                AsymmetricCipherKeyPair p1 = pGen.GenerateKeyPair();
+
+                epk.Add("kty", "EC");
+                epk.Add("crv", m_key.AsString("crv"));
+                ECPublicKeyParameters priv = (ECPublicKeyParameters) p1.Public;
+                epk.Add("x", priv.Q.Normalize().XCoord.ToBigInteger().ToByteArrayUnsigned());
+                epk.Add("y", priv.Q.Normalize().YCoord.ToBigInteger().ToByteArrayUnsigned());
+
+            }
+            else if (m_key.AsString("kty") == "OKP") {
+                switch (m_key.AsString("crv")) {
+                case "X25519":
+                    COSE.X25519KeyPair item = COSE.X25519.GenerateKeyPair();
+
+                    epk.Add("kty", "OKP");
+                    epk.Add("crv", "X25519");
+                    epk.Add("x", item.Public);
+                    break;
+
+                default:
+                    throw new JOSE_Exception("Unknown OPK curve");
+                }
+            }
+            else {
+                throw new JOSE_Exception("Internal Error");
+            }
             if (msg.FindAttribute("epk", true) != null) msg.AddAttribute("epk", epk, true);
             else if (msg.FindAttribute("epk", false) != null) msg.AddAttribute("epk", epk, false);
             else AddUnprotected("epk", epk);
         }
 
+
         private byte[] ECDH_GenerateSecret(Key key, EncryptMessage msg)
         {
             Key epk;
 
-            if (key.AsString("kty") != "EC") throw new Exception("Not an EC Key");
+            if ((key.AsString("kty") != "EC") && (key.AsString("kty") != "OKP")) throw new Exception("Not an EC or OKP Key");
 
             if (m_senderKey != null) {
                 epk = m_senderKey;
@@ -1227,22 +1254,33 @@ namespace JOSE
 
             if (epk.AsString("crv") != key.AsString("crv")) throw new Exception("not a match of curves");
 
-            //  Get the curve
+            if (key.AsString("kty") == "EC") {
+                //  Get the curve
 
-            X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
-            ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
+                X9ECParameters p = NistNamedCurves.GetByName(key.AsString("crv"));
+                ECDomainParameters parameters = new ECDomainParameters(p.Curve, p.G, p.N, p.H);
 
-            Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
-            ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
+                Org.BouncyCastle.Math.EC.ECPoint pubPoint = p.Curve.CreatePoint(epk.AsBigInteger("x"), epk.AsBigInteger("y"));
+                ECPublicKeyParameters pub = new ECPublicKeyParameters(pubPoint, parameters);
 
-            ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
+                ECPrivateKeyParameters priv = new ECPrivateKeyParameters(key.AsBigInteger("d"), parameters);
 
-            IBasicAgreement e1 = new ECDHBasicAgreement();
-            e1.Init(priv);
+                IBasicAgreement e1 = new ECDHBasicAgreement();
+                e1.Init(priv);
 
-            BigInteger k1 = e1.CalculateAgreement(pub);
+                BigInteger k1 = e1.CalculateAgreement(pub);
 
-            return k1.ToByteArrayUnsigned();
+                return k1.ToByteArrayUnsigned();
+            }
+            else {
+                switch (epk.AsString("crv")) {
+                case "X25519":
+                    return COSE.X25519.CalculateAgreement(epk.AsBytes("x"), key.AsBytes("d"));
+
+                default:
+                    throw new JOSE_Exception("Unsupported curve");
+                }
+            }
         }
 
 #if false

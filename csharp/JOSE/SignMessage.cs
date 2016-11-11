@@ -21,7 +21,6 @@ namespace JOSE
     public class SignMessage : Message
     {
         public byte[] payloadB64;
-
         public byte[] payload;
 
         List<Signer> signerList = new List<Signer>();
@@ -94,12 +93,18 @@ namespace JOSE
             ForceArray(true);
             objBody = EncodeToJSON();
 
+            //  Base64 encoding says kill some messages
+            
+
             if (objBody.ContainsKey("signatures")) objSigners = objBody["signatures"][0];
 
             string str = "";
             if (objSigners != null && objSigners.ContainsKey("protected")) str += objSigners["protected"].AsString();
             str += ".";
-            if (objBody.ContainsKey("payload")) str += objBody["payload"].AsString();
+            if (objBody.ContainsKey("payload")) {
+                if (objBody["payload"].AsString().Contains('.')) throw new Exception("Message cannot contain a period character");
+                str += objBody["payload"].AsString();
+            }
             str += ".";
             if (objSigners != null && objSigners.ContainsKey("signature")) str += objSigners["signature"].AsString();
 
@@ -109,19 +114,34 @@ namespace JOSE
         public JSON EncodeToJSON()
         {
             JSON obj = new JSON();
-
-#if false
-            string strProtected = "";
-
-            if (objProtected.Count > 0) {
-                strProtected = base64urlencode(UTF8Encoding.UTF8.GetBytes(objProtected.ToString()));
-                obj.Add("protected", strProtected);
-            }
-#endif
-
+            
             if (objUnprotected.Count > 0) obj.Add("unprotected", objUnprotected); // Add unprotected attributes
 
-            obj.Add("payload", base64urlencode(payload));
+            //  Look at the world of base64 encoded bodies.
+            //   If any signer has the b64 false, then all of them need to.
+            //   Then change our body if needed
+
+            int b64Found = 0;
+            bool b64Value = true;
+
+            foreach( Signer key in signerList) {
+                JSON attr = key.FindAttribute("b64", true);
+                if (attr != null) {
+                    if (b64Found == 0) b64Value = attr.AsBoolean();
+                    else if (b64Value != attr.AsBoolean()) {
+                        throw new JOSE_Exception("Not all signers using the same value for b64");
+                    }
+                    b64Found += 1;
+                }
+            }
+
+            if (b64Value) {
+                obj.Add("payload", base64urlencode(payload));
+            }
+            else {
+                if (b64Found != signerList.Count) throw new JOSE_Exception("Not all signers using the same value for b64");
+                obj.Add("payload", UTF8Encoding.UTF8.GetString(payload));
+            }
 
             if ((signerList.Count == 1) && !forceAsArray) {
                 JSON recipient = signerList[0].EncodeToJSON(payload);
@@ -238,7 +258,10 @@ namespace JOSE
 
             String str = "";
 
-            str += strProtected + "." + Message.base64urlencode( body );
+            if (objProtected.ContainsKey("b64") && objProtected["b64"].AsBoolean() == false) {
+                str += strProtected + "." + UTF8Encoding.UTF8.GetString(body);
+            }
+            else str += strProtected + "." + Message.base64urlencode( body );
 
             obj.Add("signature", Sign(UTF8Encoding.UTF8.GetBytes(str)));
 
@@ -315,6 +338,11 @@ namespace JOSE
                 digest2 = new Sha512Digest();
                 break;
 
+            case "EdDSA":
+                digest = null;
+                digest2 = null;
+                break;
+
             default:
                 throw new JOSE_Exception("Unknown signature algorithm");
             }
@@ -380,6 +408,16 @@ namespace JOSE
 
                 return resBuf;
                 }
+
+            case "EdDSA": {
+                    switch (keyToSign.AsString("crv")) {
+                    case "Ed25519":
+                        COSE.EdDSA25517 x = new COSE.EdDSA25517();
+                        return x.Sign(keyToSign.AsBytes("x"), keyToSign.AsBytes("d"), bytesToBeSigned);
+                    }
+                }
+                break;
+
             }
             return null;
         }

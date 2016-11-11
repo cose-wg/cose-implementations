@@ -517,13 +517,6 @@ namespace COSE
 
             return rgbY;
         }
-
-        public Boolean equal(EdDSAPoint other)
-        {
-            if (!this.X.Equals(other.X)) return false;
-            if (!this.Y.Equals(other.Y)) return false;
-            return true;
-        }
     }
 
     public abstract class EdDSA

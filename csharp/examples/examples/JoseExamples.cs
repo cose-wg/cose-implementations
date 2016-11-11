@@ -1,16 +1,257 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace JOSE
+using JOSE;
+using Org.BouncyCastle.Crypto.Digests;
+
+
+namespace examples
 {
+    public class JoseExamples
+    {
+        public static void RunTests()
+        {
+            DirectoryInfo diTop;
+
+            if (false) {
+                Console.WriteLine("ProcessFile: ");
+                ProcessNestedFile(@"c:\projects\JOSE\test\6.nesting_signatures_and_encryption.json");
+
+                //      PBE_Tests();
+
+                diTop = new DirectoryInfo(@"c:\Projects\JOSE\test\jwe");
+
+
+                foreach (var fi in diTop.EnumerateFiles()) {
+                    Console.WriteLine("Process file: " + fi.Name);
+                    ProcessFile(fi.FullName);
+                }
+
+
+                diTop = new DirectoryInfo(@"c:\projects\JOSE\test\jws");
+                foreach (var fi in diTop.EnumerateFiles()) {
+                    Console.WriteLine("Process file: " + fi.Name);
+                    ProcessFile(fi.FullName);
+
+                }
+            }
+            diTop = new DirectoryInfo(@"c:\projects\JOSE\test\jws-2");
+            foreach (var fi in diTop.EnumerateFiles()) {
+                Console.WriteLine("Process file: " + fi.Name);
+                ProcessFile(fi.FullName);
+            }
+            diTop = new DirectoryInfo(@"c:\projects\JOSE\test\eddsa");
+            foreach (var fi in diTop.EnumerateFiles()) {
+                Console.WriteLine("Process file: " + fi.Name);
+                ProcessFile(fi.FullName);
+            }
+
+        }
+
+        static void ProcessFile(string fileName)
+        {
+            if (fileName[fileName.Length - 1] == '~') return;
+            if (fileName[fileName.Length - 1] == '#') return;
+
+            StreamReader file = File.OpenText(fileName);
+
+            string fileText = file.ReadToEnd();
+
+            JSON control;
+            try {
+                control = JSON.Parse(fileText);
+            }
+            catch (Exception e) {
+                return;
+            }
+
+            if (control["input"].ContainsKey("passport")) {
+                ProcessPassport(control);
+            }
+            else {
+                ProcessJSON(control);
+            }
+        }
+
+        static void ProcessJSON(JSON control)
+        {
+            KeySet keys = null;
+
+            //  Get the keys
+
+            if (control["input"].ContainsKey("key")) {
+                keys = new KeySet(control["input"]["key"]);
+            }
+            if (control["input"].ContainsKey("pwd")) {
+                Key key = new Key();
+                key.Add("kty", "oct");
+                key.Add("k", Message.base64urlencode(UTF8Encoding.UTF8.GetBytes(control["input"]["pwd"].AsString())));
+                keys = new KeySet();
+                keys.Add(key);
+            }
+            if (keys == null) {
+                Console.WriteLine("No keys found");
+                return;
+            }
+
+            //
+            //  Check that we can validate each of these items
+            //
+            //  Start with compact
+
+            if (control["output"].ContainsKey("compact")) {
+                Console.WriteLine("    Compact");
+                for (int i = 0; i < keys.Count; i++) {
+                    Message msg = Message.DecodeFromString(control["output"]["compact"].AsString());
+
+                    CheckMessage(msg, keys[i], control["input"]);
+
+                }
+
+                //
+                //  Build a new version of the message
+                //
+
+                BuildCompact(control, keys);
+            }
+
+            if (control["output"].ContainsKey("json")) {
+                Console.WriteLine("     Full");
+                for (int i = 0; i < keys.Count; i++) {
+                    Message msg = Message.DecodeFromJSON(control["output"]["json"]);
+
+                    CheckMessage(msg, keys[i], control["input"]);
+                }
+            }
+
+            if (control["output"].ContainsKey("json_flat")) {
+                Console.WriteLine("     Flat");
+                for (int i = 0; i < keys.Count; i++) {
+                    Message msg = Message.DecodeFromJSON(control["output"]["json_flat"]);
+
+                    CheckMessage(msg, keys[i], control["input"]);
+                }
+            }
+        }
+
+        static void ProcessNestedFile(string fileName)
+        {
+            StreamReader file = File.OpenText(fileName);
+
+            string fileText = file.ReadToEnd();
+
+            JSON control = JSON.Parse(fileText);
+
+            ProcessJSON(control["sign"]);
+
+            ProcessJSON(control["encrypt"]);
+
+        }
+
+
+        static void CheckMessage(Message msg, Key key, JSON input)
+        {
+            if (msg.GetType() == typeof(EncryptMessage)) {
+                EncryptMessage enc = (EncryptMessage) msg;
+
+                try {
+                    enc.Decrypt(key);
+                }
+                catch (Exception e) { Console.WriteLine("Failed to decrypt " + e.ToString()); return; }
+
+                if (enc.GetContentAsString() != input["plaintext"].AsString()) Console.WriteLine("Plain text does not match");
+            }
+            else if (msg.GetType() == typeof(SignMessage)) {
+                SignMessage sig = (SignMessage) msg;
+
+                try {
+                    try {
+                        sig.GetContentAsString();
+                    }
+                    catch (System.Exception e) {
+                        sig.SetContent(input["payload"].AsString());
+                    }
+                    sig.Verify(key);
+
+                    if (sig.GetContentAsString() != input["payload"].AsString()) Console.WriteLine("Plain text does not match");
+                }
+                catch (Exception e) { Console.WriteLine("Failed to verify " + e.ToString()); return; }
+            }
+        }
+
+        static void BuildCompact(JSON control, KeySet keys)
+        {
+            //  Encrypted or Signed?
+            if (control.ContainsKey("signing")) {
+                JOSE.SignMessage sign = new JOSE.SignMessage();
+                JOSE.Signer signer = new JOSE.Signer(keys[0]);
+
+                sign.SetContent(control["input"]["payload"].AsString());
+                sign.AddSigner(signer);
+
+                JSON xx = control["signing"]["protected"];
+                foreach (string key in xx.Keys) {
+                    signer.AddProtected(key, xx[key]);
+                }
+
+                string output = sign.EncodeCompact();
+
+                Message msg = Message.DecodeFromString(output);
+
+                CheckMessage(msg, keys[0], control["input"]);
+
+            }
+            else if (control.ContainsKey("encrypting_key")) {
+                JOSE.EncryptMessage enc = new EncryptMessage();
+                JSON xx = control["encrypting_content"]["protected"];
+                foreach (string key in xx.Keys) {
+                    enc.AddProtected(key, xx[key]);
+                }
+
+                JOSE.Recipient recip = new Recipient(keys[0], control["input"]["alg"].AsString(), enc);
+
+                enc.AddRecipient(recip);
+                enc.SetContent(control["input"]["plaintext"].AsString());
+
+
+                string output = enc.EncodeCompact();
+
+                Message msg = Message.DecodeFromString(output);
+
+                CheckMessage(msg, keys[0], control["input"]);
+
+            }
+        }
+
+        static void PBE_Tests()
+        {
+            byte[] password = UTF8Encoding.ASCII.GetBytes("password");
+            byte[] salt = UTF8Encoding.ASCII.GetBytes("salt");
+
+            byte[] output = Recipient.PBKF2(password, salt, 1, 20, new Sha1Digest());
+            output = Recipient.PBKF2(password, salt, 2, 20, new Sha1Digest());
+
+        }
+
+        static void ProcessPassport(JSON control)
+        {
+
+        }
+
+    }
+
+#if false
     public enum JsonType
     {
         unknown = -1, map = 1, text = 2, array = 3, number = 4, boolean = 5
     }
+#endif
 
+#if false
     public class JSON
     {
         string source;
@@ -25,46 +266,30 @@ namespace JOSE
 
         }
 
-#if false
         public JSON(String text)
         {
             source = text;
             int used = Parse(0);
             if (used != text.Length) throw new Exception("Did not use entire string");
         }
-#endif
 
         public JSON(byte[] rgb)
         {
-            nodeType = JsonType.text;
             text = Message.base64urlencode(rgb);
+            nodeType = JsonType.text;
         }
 
-        public JSON(int iVal)
+        public JSON(int i)
         {
             nodeType = JsonType.number;
-            number = iVal;
+            number = i;
         }
 
-        public static JSON Parse(string text)
+        public static JSON Parse(String text)
         {
             JSON json = new JSON();
-            json.source = text;
-            int used = json.Parse(0);
-            if (used != text.Length) throw new Exception("Did not use entire string");
+            json.Parse(text, 0);
             return json;
-        }
-
-        public void Clear()
-        {
-            switch (nodeType) {
-            case JsonType.text: text = null; break;
-            case JsonType.number: number = 0; break;
-            case JsonType.array: array = null; break;
-            case JsonType.map: map = null; break;
-            }
-
-            nodeType = JsonType.unknown;
         }
 
         public int Parse(String text, int offset)
@@ -220,6 +445,26 @@ namespace JOSE
             return offset - offsetStart;
         }
 
+        private int ParseWord(int offsetStart, string word)
+        {
+            int offset = offsetStart;
+
+            for (int i = 0; i < word.Length; i++) {
+                if (source[offset + i] != word[i]) throw new Exception("Invalid JSON matching " + word);
+            }
+
+            offset += word.Length + 1;
+            offset += SkipWhiteSpace(offset);
+
+            switch (word) {
+            case "false": nodeType = JsonType.boolean; number = 0; break;
+            case "true": nodeType = JsonType.boolean; number = -1; break;
+            default: throw new Exception("ICE");
+            }
+
+            return offset - offsetStart;
+        }
+
         private int ParseString(int offsetStart)
         {
             int offset = offsetStart;
@@ -273,26 +518,6 @@ namespace JOSE
             return offset - offsetStart;
         }
 
-        private int ParseWord(int offsetStart, string word)
-        {
-            int offset = offsetStart;
-
-            for (int i = 0; i < word.Length; i++) {
-                if (source[offset + i] != word[i]) throw new Exception("Invalid JSON matching " + word);
-            }
-
-            offset += word.Length;
-            offset += SkipWhiteSpace(offset);
-
-            switch (word) {
-            case "false": nodeType = JsonType.boolean; number = 0; break;
-            case "true": nodeType = JsonType.boolean; number = -1; break;
-            default: throw new Exception("ICE");
-            }
-
-            return offset - offsetStart;
-        }
-
         private int SkipWhiteSpace(int offsetStart)
         {
             int offset = offsetStart;
@@ -310,12 +535,6 @@ namespace JOSE
                 JSON objJson = new JSON();
                 objJson.nodeType = JsonType.text;
                 objJson.text = (string) obj;
-                return objJson;
-            }
-            else if (obj.GetType() == typeof(byte[])) {
-                JSON objJson = new JSON();
-                objJson.nodeType = JsonType.text;
-                objJson.text = Message.base64urlencode((byte[]) obj);
                 return objJson;
             }
             else {
@@ -351,9 +570,7 @@ namespace JOSE
 
         public bool ContainsKey(string key)
         {
-            if (nodeType == JsonType.unknown) return false;
-            if (nodeType == JsonType.map) return map.ContainsKey(key);
-            throw new Exception("Can't ask if this element contains a key");
+            return map.ContainsKey(key);
         }
 
         public void Remove(string key)
@@ -393,131 +610,19 @@ namespace JOSE
 
         public byte[] AsBytes()
         {
-            if (nodeType != JsonType.text) throw new Exception("Not a string");
-            return JOSE.Message.base64urldecode(text);
-        }
-
-        public Boolean AsBoolean()
-        {
-            if (nodeType != JsonType.boolean) throw new Exception("Not a boolean");
-            return number != 0;
+            if (nodeType != JsonType.text) throw new Exception("not a string");
+            return Message.base64urldecode(text);
         }
 
         public int Count
         {
-            get {
+            get
+            {
                 if (nodeType == JsonType.array) return array.Count;
                 if (nodeType == JsonType.map) return map.Count;
                 return 0;
             }
         }
-
-        public Dictionary<string, JSON>.KeyCollection Keys
-        {
-            get
-            {
-                if (nodeType != JsonType.map) throw new Exception("Not a map");
-                return map.Keys;
-            }
-        }
-
-        public string Set(string value)
-        {
-            Clear();
-            nodeType = JsonType.text;
-            text = value;
-
-            return value;
-        }
-
-        public JSON Set(JSON value)
-        {
-            Clear();
-            nodeType = value.nodeType;
-            this.map = value.map;
-            this.array = value.array;
-            this.text = value.text;
-            this.number = value.number;
-            this.source = value.source;
-
-            return this;
-        }
-
-        public string Serialize(int depth = 0)
-        {
-            string tmp = "";
-
-            switch (nodeType) {
-            case JsonType.text:
-                return '"' + text.Replace("\n", "\\n").Replace("\"", "\\\"") + "\"";
-
-            case JsonType.number:
-                return number.ToString();
-
-            case JsonType.map:
-                tmp = "{\r\n";
-                foreach (KeyValuePair<string, JSON> pair in map) {
-                    tmp += indent(depth + 1) + '"' + pair.Key + "\": " + pair.Value.Serialize(depth + 1) + ",\r\n";
-                }
-                tmp = tmp.Substring(0, tmp.Length - 3) + "\r\n" + indent(depth) + "}";
-                return tmp;
-
-            case JsonType.array:
-                tmp = "[\r\n";
-                foreach (JSON value in array) {
-                    tmp += indent(depth + 1) + value.Serialize(depth + 1) + ",\r\n";
-                }
-                tmp = tmp.Substring(0, tmp.Length - 3) + "\r\n" + indent(depth) + "]";
-                return tmp;
-
-            case JsonType.boolean:
-                return number != 0 ? "true" : "false";
-
-            default:
-                throw new Exception("Internal Error");
-            }
-        }
-
-        override public string ToString()
-        {
-            string tmp = "";
-
-            switch (nodeType) {
-            case JsonType.text:
-                return '"' + text.Replace("\n", "\\n") + "\"";
-
-            case JsonType.number:
-                return number.ToString();
-
-            case JsonType.map:
-                tmp = "{";
-                foreach (KeyValuePair<string, JSON> pair in map) {
-                    tmp += '"' + pair.Key + "\":" + pair.Value.ToString() + ",";
-                }
-                tmp = tmp.Substring(0, tmp.Length - 1) + "}";
-                return tmp;
-
-            case JsonType.array:
-                tmp = "[";
-                foreach (JSON value in array) {
-                    tmp += value.ToString() + ",";
-                }
-                tmp = tmp.Substring(0, tmp.Length - 1) + "]";
-                return tmp;
-
-            case JsonType.boolean:
-                return number != 0 ? "true" : "false";
-
-            default:
-                throw new Exception("Internal Error");
-            }
-        }
-
-        private string indent(int depth)
-        {
-            string tmp = "";
-            for (int i = 0; i < depth; i++) tmp += "    ";
-            return tmp;
-        }
     }
+#endif
 }
